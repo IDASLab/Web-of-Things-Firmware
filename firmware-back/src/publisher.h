@@ -1,31 +1,32 @@
 #ifndef PUBLISHER_H
 #define PUBLISHER_H
 
+#include <Arduino.h>
 #include <AsyncMqttClient.h>
-#include "ArduinoJson.h"
 
-class Publisher {
-   
-    public:
-        void begin();
-        void loop();
-        String getBrokerAddress();
-        char* getBrokerTopic();
+class Publisher
+{
+public:
+    void begin();
+    void loop();
+    // Publish one reading (call after each valid sensor sample).
+    void publish(float temperature, float humidity);
+    String getBrokerAddress();
+    const char *getBrokerTopic();
+    bool connected() { return mqttClient.connected(); }
 
-    private:
-        IPAddress BrokerHost;
-        uint16_t BrokerPort;
-        char* Topic;
-        uint8_t Qos;
+private:
+    AsyncMqttClient mqttClient;
+    char host[65] = "";
+    char topic[65] = "";
+    char clientId[24] = "";
+    uint16_t port = 0;
+    uint8_t qos = 0;
+    uint32_t appliedRevision = UINT32_MAX;
+    uint32_t nextConnectAttempt = 0;
+    uint32_t retryDelay = 2000;
 
-        bool MQTTReconnect = false;
-        
-        StaticJsonDocument<150> Payload;
-        AsyncMqttClient mqttClient;
-        unsigned long loopPrevious = 0;
-        
-        void MqttPublish();
-        void MqttReconnectServer();
+    void applyConfig();
 };
 
 extern Publisher mqttPublisher;

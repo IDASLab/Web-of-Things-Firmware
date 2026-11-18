@@ -1,10 +1,7 @@
-
-#include "AsyncJson.h"
-#include "ArduinoJson.h"
+#include <ArduinoJson.h>
 
 #include "dashboard.h"
 #include "webServer.h"
-#include "configManager.h"
 
 void dashboard::begin()
 {
@@ -13,40 +10,45 @@ void dashboard::begin()
 
 void dashboard::loop()
 {
-    if (loopPrevious == 0 || (millis() - loopPrevious > configManager.sensorConfigData.sampleRate))
+    // Free memory held by WebSocket clients that went away.
+    if (millis() - lastCleanup > 1000)
     {
-        loopPrevious = millis();
-        send();
+        lastCleanup = millis();
+        server.ws.cleanupClients();
     }
 }
 
 void dashboard::send()
 {
-    unsigned long now = millis();
-    char payload[128];
-    
-    StaticJsonDocument<100> root;
-    root["timestamp"] = now;
-    root["sensorstatus"] = dash.data.sensorStatus; 
-    root["networkstatus"] = dash.data.networkStatus;
-    root["brokerstatus"] = dash.data.brokerStatus;
-    root["temperature"] = dash.data.temperature;
-    root["humidity"] = dash.data.humidity;
-    serializeJson(root, payload);
-    
+    if (server.ws.count() == 0)
+        return;
+
+    JsonDocument root;
+    root["timestamp"] = millis();
+    root["sensorstatus"] = data.sensorStatus;
+    root["networkstatus"] = data.networkStatus;
+    root["brokerstatus"] = data.brokerStatus;
+    if (!isnan(data.temperature))
+    {
+        root["temperature"] = serialized(String(data.temperature, 1));
+        root["humidity"] = serialized(String(data.humidity, 1));
+    }
+
+    char payload[160];
+    serializeJson(root, payload, sizeof(payload));
     server.ws.textAll(payload);
 }
 
 void dashboard::onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *dataIn, size_t len)
 {
-    /* initialize new client */
     if (type == WS_EVT_CONNECT)
     {
-        Serial.println("New WS client is connected.");
+        Serial.println(F("New WS client connected"));
+        dash.send(); // show values immediately instead of after the next sample
     }
     else if (type == WS_EVT_DISCONNECT)
     {
-        Serial.println("WS client is Disconnected");
+        Serial.println(F("WS client disconnected"));
     }
 }
 

@@ -1,9 +1,8 @@
-#include "webServer.h"
-#include "ArduinoJson.h"
-#include "AsyncJson.h"
-#include "LittleFS.h"
+#include <ArduinoJson.h>
+#include <AsyncJson.h>
+#include <LittleFS.h>
 
-// Include the html file
+#include "webServer.h"
 #include "default/html.h"
 
 #include "WiFiManager.h"
@@ -12,303 +11,396 @@
 #include "publisher.h"
 #include "sensor.h"
 #include "dashboard.h"
+#include "system.h"
 
+// Define WOT_ENABLE_CORS (build flag) only while developing the front end
+// on another origin. It weakens the protection against malicious web pages.
+
+static const char JSON_TYPE[] = "application/json";
+
+static void sendOk(AsyncWebServerRequest *request, const char *message = "message is received")
+{
+    JsonDocument doc;
+    doc["status"] = "successed"; // spelling kept for the existing front end
+    doc["message"] = message;
+    String out;
+    serializeJson(doc, out);
+    request->send(200, JSON_TYPE, out);
+}
+
+static void sendError(AsyncWebServerRequest *request, int code, const String &message)
+{
+    JsonDocument doc;
+    doc["status"] = "failed";
+    doc["message"] = message;
+    String out;
+    serializeJson(doc, out);
+    request->send(code, JSON_TYPE, out);
+}
+
+// Accept only plain file names at the root of the file system:
+// letters, digits, '.', '_', '-', at most 31 characters, not hidden.
+static bool sanitizeFilename(String name, String &path)
+{
+    int slash = name.lastIndexOf('/');
+    if (slash >= 0)
+        name = name.substring(slash + 1);
+    if (name.length() == 0 || name.length() > 31 || name[0] == '.')
+        return false;
+    for (size_t i = 0; i < name.length(); i++)
+    {
+        char c = name[i];
+        if (!(isalnum(c) || c == '.' || c == '_' || c == '-'))
+            return false;
+    }
+    path = "/" + name;
+    return true;
+}
+
+static const char *str(JsonVariantConst v, const char *fallback = "")
+{
+    const char *s = v.as<const char *>();
+    return s ? s : fallback;
+}
+
+// Registers a POST endpoint with a JSON body. The library assembles chunked
+// bodies and rejects requests without "Content-Type: application/json"
+// (which a cross-site form cannot send).
+static void onJson(AsyncWebServer &srv, const char *uri, std::function<void(AsyncWebServerRequest *, JsonObjectConst)> fn)
+{
+    AsyncCallbackJsonWebHandler *h = new AsyncCallbackJsonWebHandler(uri, [fn](AsyncWebServerRequest *request, JsonVariant &json) {
+        if (!json.is<JsonObject>())
+        {
+            sendError(request, 400, F("JSON object expected"));
+            return;
+        }
+        fn(request, json.as<JsonObjectConst>());
+    });
+    h->setMethod(HTTP_POST);
+    h->setMaxContentLength(1024);
+    srv.addHandler(h);
+}
+
+void webServer::checkSameOrigin(AsyncWebServerRequest *request, ArMiddlewareNext next)
+{
+#ifndef WOT_ENABLE_CORS
+    // Block cross-site requests that change state (CSRF): a page on another
+    // site could otherwise reset or reflash the device through your browser.
+    if (request->method() != HTTP_GET && request->method() != HTTP_HEAD && request->method() != HTTP_OPTIONS)
+    {
+        String source = request->header("Origin");
+        if (source.length() == 0)
+            source = request->header("Referer");
+        if (source.length() > 0)
+        {
+            int start = source.indexOf("://");
+            String hostPart = start >= 0 ? source.substring(start + 3) : source;
+            int end = hostPart.indexOf('/');
+            if (end >= 0)
+                hostPart = hostPart.substring(0, end);
+            if (!hostPart.equalsIgnoreCase(request->host()))
+            {
+                request->send(403, "text/plain", "Cross-origin request blocked");
+                return;
+            }
+        }
+    }
+#endif
+    next();
+}
+
+void webServer::updateCredentials()
+{
+    basicAuth.setUsername(ADMIN_USER);
+    basicAuth.setPassword(configManager.admin.password);
+    basicAuth.generateHash();
+}
 
 void webServer::begin()
 {
-    //enable testing and debugging of the interface
-    DefaultHeaders::Instance().addHeader(PSTR("Access-Control-Allow-Origin"), PSTR("*"));
+#ifdef WOT_ENABLE_CORS
+    DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
+#endif
+
+    // Everything (page, API, WebSocket, downloads) needs the admin login.
+    basicAuth.setRealm("WoT Device");
+    basicAuth.setAuthFailureMessage("Authentication required");
+    basicAuth.setAuthType(AsyncAuthType::AUTH_BASIC);
+    updateCredentials();
+    server.addMiddlewares({&sameOrigin, &basicAuth});
 
     server.addHandler(&ws);
+    bindAll();
+    server.onNotFound(serveProgmem);
     server.begin();
 
-    server.serveStatic("/download", LittleFS, "/");
-
-    server.onNotFound(serveProgmem);
-
-    //handle uploads
-    server.on(PSTR("/upload"), HTTP_POST, [](AsyncWebServerRequest *request) {}, handleFileUpload);
-
-    bindAll();
+    if (configManager.adminPasswordIsDefault())
+        Serial.println(F("WARNING: web login is still admin/admin. Change it with POST /api/config/admin/set"));
 }
 
 void webServer::bindAll()
-{   
-    //Options index
-    server.on(PSTR("/api/index"), HTTP_OPTIONS,[](AsyncWebServerRequest *request){
-        request->send(200, PSTR("application/json"), "{\"status\": \"successed\", \"message\": \"WoT Device is alive!\"}");
+{
+    server.on("/api/index", HTTP_OPTIONS | HTTP_GET, [](AsyncWebServerRequest *request) {
+        sendOk(request, "WoT Device is alive!");
     });
 
-    //Update netowrk details with static address
-    server.on(PSTR("/api/network/setStaticIP"), HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
-      [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
-            
-            StaticJsonDocument<96> doc;            
-            DeserializationError error = deserializeJson(doc, (char*)data);
-            
-            if (!error) {
-                request->send(200, PSTR("application/json"), "{\"status\": \"successed\",\"message\": \"message is received\"}");
-                WiFiManager.setNewStaticWifi(doc["ssid"], doc["pass"], doc["ip"],doc["subnet"], doc["gateway"], doc["dns"]);
-            }
-            else{
-                request->send(400, PSTR("application/json"), "{\"status\": \"failed\",\"message\": \"message is missed\"}");
-            }
+    // ---- Network ---------------------------------------------------------
+
+    onJson(server, "/api/network/setStaticIP", [](AsyncWebServerRequest *request, JsonObjectConst doc) {
+        const char *ssid = str(doc["ssid"]);
+        if (strlen(ssid) == 0 || strlen(ssid) > 32 || strlen(str(doc["pass"])) > 64)
+            return sendError(request, 400, F("Invalid SSID or password"));
+        if (!isValidIP(str(doc["ip"])) || !isValidIP(str(doc["subnet"])) || !isValidIP(str(doc["gateway"])) || !isValidIP(str(doc["dns"])))
+            return sendError(request, 400, F("Invalid IP, subnet, gateway or DNS address"));
+        sendOk(request);
+        WiFiManager.setNewStaticWifi(ssid, str(doc["pass"]), str(doc["ip"]), str(doc["subnet"]), str(doc["gateway"]), str(doc["dns"]));
     });
 
-    //update Network details
-    server.on(PSTR("/api/network/set"), HTTP_POST, [](AsyncWebServerRequest *request) {},NULL,
-    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
-            StaticJsonDocument<48> doc;
-            DeserializationError error = deserializeJson(doc, (char*)data);
-            
-            if (!error) {
-                request->send(200, PSTR("application/json"), "{\"status\": \"successed\",\"message\": \"message is received\"}");
-                
-                WiFiManager.setNewWifi(doc["ssid"], doc["pass"]);
-            }
-            else{
-                request->send(400, PSTR("application/json"), "{\"status\": \"failed\",\"msg\": \"message is missed\"}");
-            }
+    onJson(server, "/api/network/set", [](AsyncWebServerRequest *request, JsonObjectConst doc) {
+        const char *ssid = str(doc["ssid"]);
+        if (strlen(ssid) == 0 || strlen(ssid) > 32 || strlen(str(doc["pass"])) > 64)
+            return sendError(request, 400, F("Invalid SSID or password"));
+        sendOk(request);
+        WiFiManager.setNewWifi(ssid, str(doc["pass"]));
     });
 
-    //Update device configuration
-    server.on(PSTR("/api/config/device/set"),HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
-      [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
-
-            StaticJsonDocument<96> doc;
-            
-            DeserializationError error = deserializeJson(doc, (char*)data);
-            if (!error) {
-                request->send(200, PSTR("application/json"), "{\"status\": \"successed\",\"message\": \"message is received\"}");
-                
-                configManager.setDeviceConfig(doc["name"] ,doc["ssid"], doc["pass"]);
-            }
-            else{
-                request->send(400, PSTR("application/json"), "{\"status\": \"failed\",\"message\": \"message is missed\"}");
-            }
-    });
-     
-    // Update device with capitive portal configuration
-     server.on(PSTR("/api/config/device/setStatic"),HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
-      [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
-
-            StaticJsonDocument<96> doc;
-            DeserializationError error = deserializeJson(doc, (char*)data);
-            if (!error) {
-                request->send(200, PSTR("application/json"), "{\"status\": \"successed\",\"message\": \"message is received\"}");
-                
-                configManager.setStaticDeviceConfig(doc["name"] ,doc["ssid"], doc["pass"], doc["ip"], doc["subnet"], doc["gateway"]);
-            }
-            else{
-                request->send(400, PSTR("application/json"), "{\"status\": \"failed\",\"message\": \"message is missed\"}");
-            }
-    });
-    
-    // Update sensor configuration
-    server.on(PSTR("/api/config/sensor/set"),HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
-      [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
-
-            StaticJsonDocument<48> doc;
-            DeserializationError error = deserializeJson(doc, (char*)data);
-            if (!error) {
-                request->send(200, PSTR("application/json"), "{\"status\": \"successed\",\"message\": \"message is received\"}");
-                
-                configManager.setSensorConfig(doc["rate"]);
-            }
-            else{
-                request->send(400, PSTR("application/json"), "{\"status\": \"failed\",\"message\": \"message is missed\"}");
-            }
-    });
-    
-    // Update broker configuration
-    server.on(PSTR("/api/config/broker/set"),HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
-      [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
-
-            StaticJsonDocument<96> doc;
-            DeserializationError error = deserializeJson(doc, (char*)data);
-            if (!error) {
-                request->send(200, PSTR("application/json"), "{\"status\": \"successed\",\"message\": \"message is received\"}");
-                
-                configManager.setBrokerConfig(doc["status"],doc["ip"] ,doc["port"], doc["topic"], doc["qos"]);
-            }
-            else{
-                request->send(400, PSTR("application/json"), "{\"status\": \"failed\",\"message\": \"message is missed\"}");
-            }
-    });
-
-    //Restart the WoT device
-    server.on(PSTR("/api/restart"), HTTP_POST, [](AsyncWebServerRequest *request) {
-        request->send(200, PSTR("application/json"), "{\"status\": \"successed\", \"message\": \"Device is restarted!!\"}");
-        delay(2000);
-        ESP.restart();
-    });
-
-    //Reset device to defalut values
-    server.on(PSTR("/api/reset"), HTTP_POST, [](AsyncWebServerRequest *request) {
-        request->send(200, PSTR("application/json"), "{\"status\": \"successed\", \"message\": \"Device is reset to factory defaults!!\"}");
-        delay(1000);
-        configManager.reset();
-        delay(2000);
-        ESP.restart();
-    });
-
-    // Get dashboard information
-    server.on(PSTR("/api/dashboard/get"), HTTP_GET, [](AsyncWebServerRequest *request) {
-        
-        String payload;
-        StaticJsonDocument<256> jsonBuffer;
-        
-        jsonBuffer["firmwareName"] = configManager.firmwareConfigData.firmwareName;
-        jsonBuffer["firmwareVer"] = configManager.firmwareConfigData.firmwareVer;
-        jsonBuffer["sensorModel"] = configManager.sensorConfigData.model;
-        jsonBuffer["deviceName"] = configManager.deviceConfigData.deviceName;
-
-        jsonBuffer["networkSSID"] = WiFiManager.SSID();
-        jsonBuffer["networkAddress"] = WiFiManager.getAddress();
-       
-        jsonBuffer["brokerServer"] = mqttPublisher.getBrokerAddress();
-        jsonBuffer["brokerTopic"] = mqttPublisher.getBrokerTopic();
-
-        serializeJson(jsonBuffer, payload);
-
-        request->send(200, PSTR("application/json"), payload);
-    });
-
-    //Forget network cennection
-    server.on(PSTR("/api/network/forget"), HTTP_POST, [](AsyncWebServerRequest *request) {
-        request->send(200,  PSTR("application/json"), "{\"status\": \"successed\", \"message\": \"Network information is cleared successfully\"}");
+    server.on("/api/network/forget", HTTP_POST, [](AsyncWebServerRequest *request) {
+        sendOk(request, "Network information is cleared successfully");
         WiFiManager.forget();
     });
 
-    //get captive portal network details
-    server.on(PSTR("/api/network/get"), HTTP_GET, [](AsyncWebServerRequest *request) {
-        String payload;
-        StaticJsonDocument<48> jsonBuffer;
-
-        jsonBuffer["status"] = WiFiManager.isCaptivePortal();
-        jsonBuffer["ssid"] = configManager.deviceConfigData.deviceSSID;
-        jsonBuffer["pass"] = configManager.deviceConfigData.devicePass;
-        serializeJson(jsonBuffer, payload);
-
-        request->send(200, PSTR("application/json"), payload);
+    server.on("/api/network/get", HTTP_GET, [](AsyncWebServerRequest *request) {
+        JsonDocument doc;
+        doc["status"] = WiFiManager.isCaptivePortal();
+        doc["ssid"] = configManager.portalSSID();
+        doc["pass"] = ""; // never sent back
+        String out;
+        serializeJson(doc, out);
+        request->send(200, JSON_TYPE, out);
     });
 
-    //Get file listing
-    server.on(PSTR("/api/files/get"), HTTP_GET, [](AsyncWebServerRequest *request) {
-        String JSON;
-        StaticJsonDocument<1000> jsonBuffer;
-        JsonArray files = jsonBuffer.createNestedArray("files");
+    // ---- Configuration ---------------------------------------------------
 
-        //get file listing
-        Dir dir = LittleFS.openDir("");
+    onJson(server, "/api/config/device/set", [](AsyncWebServerRequest *request, JsonObjectConst doc) {
+        String error;
+        if (!configManager.setDeviceConfig(str(doc["name"]), str(doc["ssid"]), str(doc["pass"]), error))
+            return sendError(request, 400, error);
+        sendOk(request);
+    });
+
+    onJson(server, "/api/config/device/setStatic", [](AsyncWebServerRequest *request, JsonObjectConst doc) {
+        String error;
+        if (!configManager.setStaticDeviceConfig(str(doc["name"]), str(doc["ssid"]), str(doc["pass"]),
+                                                 str(doc["ip"]), str(doc["subnet"]), str(doc["gateway"]), error))
+            return sendError(request, 400, error);
+        sendOk(request);
+    });
+
+    onJson(server, "/api/config/sensor/set", [](AsyncWebServerRequest *request, JsonObjectConst doc) {
+        String error;
+        if (!doc["rate"].is<uint32_t>())
+            return sendError(request, 400, F("rate (milliseconds) is required"));
+        if (!configManager.setSensorConfig(doc["rate"].as<uint32_t>(), error))
+            return sendError(request, 400, error);
+        sendOk(request);
+    });
+
+    onJson(server, "/api/config/broker/set", [](AsyncWebServerRequest *request, JsonObjectConst doc) {
+        String error;
+        uint32_t port = doc["port"] | 0u;
+        uint32_t qos = doc["qos"] | 0u;
+        if (port > 65535 || qos > 2)
+            return sendError(request, 400, F("Invalid port or QoS"));
+        if (!configManager.setBrokerConfig(doc["status"] | false, str(doc["ip"]), port, str(doc["topic"]), qos, error))
+            return sendError(request, 400, error);
+        sendOk(request);
+    });
+
+    onJson(server, "/api/config/admin/set", [](AsyncWebServerRequest *request, JsonObjectConst doc) {
+        String error;
+        if (!configManager.setAdminPassword(str(doc["current"], nullptr), str(doc["password"], nullptr), error))
+            return sendError(request, 400, error);
+        sendOk(request, "Admin password changed");
+        ::server.updateCredentials();
+    });
+
+    server.on("/api/config/get", HTTP_GET, [](AsyncWebServerRequest *request) {
+        JsonDocument doc;
+        doc["DeviceName"] = configManager.deviceConfigData.deviceName;
+        doc["DeviceSSID"] = configManager.portalSSID();
+        doc["DevicePassword"] = ""; // never sent back; leave empty to keep it
+        doc["DeviceIP"] = configManager.deviceConfigData.deviceIP;
+        doc["DeviceGw"] = configManager.deviceConfigData.deviceGw;
+        doc["DeviceSub"] = configManager.deviceConfigData.deviceSub;
+
+        doc["MQTTStatus"] = configManager.brokerConfigData.publishRequest;
+        doc["MQTTBrokerIP"] = configManager.brokerConfigData.address;
+        doc["MQTTBrokerPort"] = configManager.brokerConfigData.port;
+        doc["MQTTBrokerTopic"] = configManager.brokerConfigData.topic;
+        doc["MQTTBrokerQoS"] = configManager.brokerConfigData.qos;
+
+        doc["SensorModel"] = configManager.sensorConfigData.model;
+        doc["SensorGPIO"] = configManager.sensorConfigData.gpio;
+        doc["SampelingRate"] = configManager.sensorConfigData.sampleRate; // key spelling kept for the front end
+
+        String out;
+        serializeJson(doc, out);
+        request->send(200, JSON_TYPE, out);
+    });
+
+    // ---- Device ----------------------------------------------------------
+
+    server.on("/api/restart", HTTP_POST, [](AsyncWebServerRequest *request) {
+        sendOk(request, "Device is restarted!!");
+        systemControl.requestRestart();
+    });
+
+    server.on("/api/reset", HTTP_POST, [](AsyncWebServerRequest *request) {
+        sendOk(request, "Device is reset to factory defaults!!");
+        systemControl.requestFactoryReset();
+    });
+
+    server.on("/api/dashboard/get", HTTP_GET, [](AsyncWebServerRequest *request) {
+        JsonDocument doc;
+        doc["firmwareName"] = FIRMWARE_NAME;
+        doc["firmwareVer"] = FIRMWARE_VERSION;
+        doc["sensorModel"] = configManager.sensorConfigData.model;
+        doc["deviceName"] = configManager.deviceConfigData.deviceName;
+        doc["networkSSID"] = WiFiManager.SSID();
+        doc["networkAddress"] = WiFiManager.getAddress();
+        doc["brokerServer"] = mqttPublisher.getBrokerAddress();
+        doc["brokerTopic"] = mqttPublisher.getBrokerTopic();
+        doc["sensorErrors"] = dhtsensor.errorCount();
+        doc["freeHeap"] = ESP.getFreeHeap();
+        doc["uptime"] = millis() / 1000;
+        String out;
+        serializeJson(doc, out);
+        request->send(200, JSON_TYPE, out);
+    });
+
+    // ---- Files and firmware update ---------------------------------------
+
+    server.on("/api/files/get", HTTP_GET, [](AsyncWebServerRequest *request) {
+        JsonDocument doc;
+        JsonArray files = doc["files"].to<JsonArray>();
+        Dir dir = LittleFS.openDir("/");
         while (dir.next())
-            files.add(dir.fileName());
-
-        //get used and total data
+        {
+            if (dir.isFile()) // skips the /sys settings folder
+                files.add(dir.fileName());
+        }
         FSInfo fs_info;
         LittleFS.info(fs_info);
-        jsonBuffer["used"] = String(fs_info.usedBytes);
-        jsonBuffer["max"] = String(fs_info.totalBytes);
-
-        serializeJson(jsonBuffer, JSON);
-
-        request->send(200, PSTR("application/json"), JSON);
+        doc["used"] = String(fs_info.usedBytes);
+        doc["max"] = String(fs_info.totalBytes);
+        String out;
+        serializeJson(doc, out);
+        request->send(200, JSON_TYPE, out);
     });
 
-    //Remove file
-    server.on(PSTR("/api/files/remove"), HTTP_POST, [](AsyncWebServerRequest *request) {
-        LittleFS.remove("/" + request->arg("filename"));
-        request->send(200, PSTR("text/html"), "");
+    server.on("/download", HTTP_GET, [](AsyncWebServerRequest *request) {
+        String path;
+        String url = request->url();
+        if (!url.startsWith("/download/") || !sanitizeFilename(url.substring(10), path) || !LittleFS.exists(path))
+            return request->send(404, "text/plain", "File not found");
+        request->send(LittleFS, path, "application/octet-stream", true);
     });
 
-    //Update from LittleFS
-    server.on(PSTR("/api/update"), HTTP_POST, [](AsyncWebServerRequest *request) {        
-        updater.requestStart("/" + request->arg("filename"));
-        request->send(200, PSTR("text/html"), "");
+    server.on("/api/files/remove", HTTP_POST, [](AsyncWebServerRequest *request) {
+        String path;
+        if (!sanitizeFilename(request->arg("filename"), path) || !LittleFS.exists(path))
+            return sendError(request, 404, F("File not found"));
+        LittleFS.remove(path);
+        request->send(200, "text/html", "");
     });
 
-    //Update status
-    server.on(PSTR("/api/update-status"), HTTP_GET, [](AsyncWebServerRequest *request) {
-        String JSON;
-        StaticJsonDocument<200> jsonBuffer;
-
-        jsonBuffer["status"] = updater.getStatus();
-        serializeJson(jsonBuffer, JSON);
-
-        request->send(200, PSTR("text/html"), JSON);
+    server.on("/api/update", HTTP_POST, [](AsyncWebServerRequest *request) {
+        String path;
+        if (!sanitizeFilename(request->arg("filename"), path) || !LittleFS.exists(path))
+            return sendError(request, 404, F("File not found"));
+        updater.requestStart(path);
+        request->send(200, "text/html", "");
     });
 
-    //Get configurations data
-    server.on(PSTR("/api/config/get"), HTTP_GET, [](AsyncWebServerRequest *request){
-
-        String payload;
-        StaticJsonDocument<384> jsonBuffer;
-        
-        jsonBuffer["DeviceName"] = configManager.deviceConfigData.deviceName;
-        jsonBuffer["DeviceSSID"] = configManager.deviceConfigData.deviceSSID;
-        jsonBuffer["DevicePassword"] = configManager.deviceConfigData.devicePass;
-
-        jsonBuffer["DeviceIP"] = configManager.deviceConfigData.deviceIP;
-        jsonBuffer["DeviceGw"] = configManager.deviceConfigData.deviceGw;
-        jsonBuffer["DeviceSub"] = configManager.deviceConfigData.deviceSub;
-
-        jsonBuffer["MQTTStatus"] = configManager.brokerConfigData.publishRequest;
-        jsonBuffer["MQTTBrokerIP"] = configManager.brokerConfigData.address;
-        jsonBuffer["MQTTBrokerPort"] = configManager.brokerConfigData.port;
-        jsonBuffer["MQTTBrokerTopic"] = configManager.brokerConfigData.topic;
-        jsonBuffer["MQTTBrokerQoS"] = configManager.brokerConfigData.qos;
-
-        jsonBuffer["SensorModel"] = configManager.sensorConfigData.model;
-        jsonBuffer["SensorGPIO"] = configManager.sensorConfigData.gpio;
-        jsonBuffer["SampelingRate"] = configManager.sensorConfigData.sampleRate;
-        
-        serializeJson(jsonBuffer, payload);
-
-        request->send(200, PSTR("application/json"), payload);
+    server.on("/api/update-status", HTTP_GET, [](AsyncWebServerRequest *request) {
+        JsonDocument doc;
+        doc["status"] = updater.getStatus();
+        String out;
+        serializeJson(doc, out);
+        request->send(200, JSON_TYPE, out);
     });
+
+    server.on("/upload", HTTP_POST, [](AsyncWebServerRequest *request) {
+        // Runs after the whole body was received.
+        bool ok = request->_tempObject != nullptr && *static_cast<bool *>(request->_tempObject);
+        request->send(200, JSON_TYPE, ok ? "{\"success\":true}" : "{\"success\":false}");
+    }, handleFileUpload);
 }
 
-// Callback for the html
-void webServer::serveProgmem(AsyncWebServerRequest *request){
-    // Dump the byte array in PROGMEM with a 200 HTTP code (OK)
-    AsyncWebServerResponse *response = request->beginResponse_P(200, PSTR("text/html"), html, html_len);
-
-    // Tell the browswer the content is Gzipped
-    response->addHeader(PSTR("Content-Encoding"), PSTR("gzip"));
-    
-    request->send(response);    
-}
-
-void webServer::handleFileUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final)
+void webServer::serveProgmem(AsyncWebServerRequest *request)
 {
-    static File fsUploadFile;
+    // Gzipped single-page UI stored in flash.
+    AsyncWebServerResponse *response = request->beginResponse_P(200, "text/html", html, html_len);
+    response->addHeader("Content-Encoding", "gzip");
+    request->send(response);
+}
 
-    if (!index)
+void webServer::handleFileUpload(AsyncWebServerRequest *request, const String &filename, size_t index, uint8_t *data, size_t len, bool final)
+{
+    // Per-request state (the old code shared one static File between uploads).
+    // _tempObject is freed by the request; _tempFile is closed with it.
+    if (index == 0)
     {
-        Serial.println(PSTR("Start file upload"));
-        Serial.println(filename);
+        bool *ok = static_cast<bool *>(malloc(sizeof(bool)));
+        if (ok == nullptr)
+            return;
+        *ok = false;
+        request->_tempObject = ok;
 
-        if (!filename.startsWith("/"))
-            filename = "/" + filename;
-
-        fsUploadFile = LittleFS.open(filename, "w");
+        String path;
+        if (!sanitizeFilename(filename, path))
+        {
+            Serial.println(F("Upload rejected: invalid file name"));
+            return;
+        }
+        FSInfo info;
+        LittleFS.info(info);
+        size_t freeBytes = info.totalBytes > info.usedBytes ? info.totalBytes - info.usedBytes : 0;
+        // Keep a margin for file system metadata and the settings file.
+        if (request->contentLength() + 16384 > freeBytes)
+        {
+            Serial.println(F("Upload rejected: not enough space"));
+            return;
+        }
+        request->_tempFile = LittleFS.open(path, "w");
+        if (!request->_tempFile)
+        {
+            Serial.println(F("Upload failed: cannot create file"));
+            return;
+        }
+        *ok = true;
+        Serial.printf_P(PSTR("Upload started: %s\n"), path.c_str());
     }
 
-    for (size_t i = 0; i < len; i++)
+    bool *ok = static_cast<bool *>(request->_tempObject);
+    if (ok == nullptr || !*ok)
+        return;
+
+    if (len > 0 && request->_tempFile.write(data, len) != len)
     {
-        fsUploadFile.write(data[i]);
+        Serial.println(F("Upload failed: write error (flash full?)"));
+        *ok = false;
     }
 
     if (final)
     {
-        String JSON;
-        StaticJsonDocument<100> jsonBuffer;
-
-        jsonBuffer["success"] = fsUploadFile.isFile();
-        serializeJson(jsonBuffer, JSON);
-
-        request->send(200, PSTR("text/html"), JSON);
-        fsUploadFile.close();        
+        String path = request->_tempFile.fullName();
+        request->_tempFile.close();
+        if (!path.startsWith("/"))
+            path = "/" + path;
+        if (!*ok)
+            LittleFS.remove(path);
+        Serial.printf_P(PSTR("Upload %s\n"), *ok ? "complete" : "failed");
     }
 }
 
