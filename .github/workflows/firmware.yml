@@ -1,0 +1,81 @@
+name: Firmware
+
+# Builds the web app and the firmware on every push and pull request.
+# Pushing a tag like v1.3.0 also publishes a GitHub release with firmware.bin.
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: firmware-front/package-lock.json
+
+      - name: Build web app (regenerates html.h)
+        working-directory: firmware-front
+        run: |
+          npm ci
+          npm run build
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ hashFiles('firmware-back/platformio.ini') }}
+
+      - name: Build firmware
+        run: |
+          pip install --quiet platformio
+          pio run -d firmware-back
+
+      - name: Check tag matches FIRMWARE_VERSION
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          grep -q "FIRMWARE_VERSION \"${GITHUB_REF_NAME}\"" firmware-back/src/default/config.h \
+            || { echo "Tag ${GITHUB_REF_NAME} does not match FIRMWARE_VERSION in firmware-back/src/default/config.h"; exit 1; }
+
+      - name: Collect binary
+        run: |
+          mkdir out
+          cp firmware-back/.pio/build/d1/firmware.bin "out/wot-logger-${GITHUB_REF_NAME//\//-}-d1.bin"
+          ls -l out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: out/*.bin
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" *.bin --clobber
