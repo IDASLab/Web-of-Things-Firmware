@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Temperature Logger</title>
+<style>
+:root{--bg:#f5f6f8;--card:#fff;--fg:#1d2330;--muted:#6b7280;--line:#e3e6ea;--accent:#2563eb;--temp:#dc2626;--hum:#2563eb;--ok:#16a34a;--warn:#d97706;--bad:#dc2626}
+@media (prefers-color-scheme:dark){:root{--bg:#111418;--card:#1b2027;--fg:#e6e8eb;--muted:#9aa3ad;--line:#2c333c;--accent:#60a5fa;--temp:#f87171;--hum:#60a5fa}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--card);border-bottom:1px solid var(--line)}
+header h1{font-size:18px;margin:0}
+nav a{color:var(--accent);text-decoration:none;margin-left:12px;font-size:14px}
+main{max-width:1100px;margin:0 auto;padding:16px;display:grid;grid-template-columns:minmax(0,1fr);gap:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px}
+.card h2{font-size:15px;margin:0 0 12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.03em}
+.row{display:flex;flex-wrap:wrap;gap:16px}
+.big{font-size:40px;font-weight:600;line-height:1.1}
+.big small{font-size:18px;color:var(--muted);font-weight:400}
+.reading{flex:1 1 160px}
+.label{color:var(--muted);font-size:13px}
+.badges{display:flex;flex-wrap:wrap;gap:6px}
+.badge{font-size:12px;padding:2px 8px;border-radius:99px;border:1px solid var(--line);color:var(--muted)}
+.badge.ok{color:var(--ok);border-color:var(--ok)}.badge.warn{color:var(--warn);border-color:var(--warn)}.badge.bad{color:var(--bad);border-color:var(--bad)}
+label{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
+input,textarea{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);font:inherit}
+textarea{min-height:60px;resize:vertical}
+.field{flex:1 1 200px}
+button,.btn{display:inline-block;padding:8px 14px;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:#fff;font:inherit;cursor:pointer;text-decoration:none}
+button.secondary,.btn.secondary{background:transparent;color:var(--accent)}
+button.danger{background:var(--bad);border-color:var(--bad)}
+button:disabled{opacity:.5;cursor:default}
+.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-top:12px}
+.stat{border:1px solid var(--line);border-radius:8px;padding:8px}
+.stat b{display:block;font-size:18px}
+#chart{width:100%;height:300px;display:block}
+#chart text{fill:var(--muted);font-size:11px}
+.legend{display:flex;gap:16px;font-size:13px;color:var(--muted);margin-bottom:6px}
+.legend i{display:inline-block;width:12px;height:3px;vertical-align:middle;margin-right:4px}
+#tip{position:fixed;pointer-events:none;background:var(--card);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:12px;display:none;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+.tablewrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{color:var(--muted);font-weight:600;font-size:12px}
+td button{padding:4px 8px;font-size:13px}
+.msg{margin-top:8px;font-size:13px}
+.msg.err{color:var(--bad)}
+.muted{color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <h1 id="devname">Temperature Logger</h1>
+  <div class="badges" id="badges"></div>
+  <nav><a href="/config">Device settings</a><a href="/network">Network</a><a href="/setting">Firmware</a></nav>
+</header>
+<main>
+  <section class="card">
+    <h2>Now</h2>
+    <div class="row">
+      <div class="reading"><div class="label">Temperature</div><div class="big" id="t">--<small> °C</small></div></div>
+      <div class="reading"><div class="label">Humidity</div><div class="big" id="h">--<small> %</small></div></div>
+      <div class="reading"><div class="label">Clock</div><div id="clock" style="font-size:18px;margin-top:8px">--</div><div class="label" id="clocksrc"></div></div>
+    </div>
+  </section>
+
+  <section class="card" id="sessioncard">
+    <h2>Experiment</h2>
+    <div id="idle">
+      <div class="row">
+        <div class="field"><label for="sname">Name</label><input id="sname" maxlength="48" placeholder="e.g. Incubator test 3"></div>
+        <div class="field" style="flex:0 1 160px"><label for="srate">Interval (seconds)</label><input id="srate" type="number" min="2" max="3600" step="1"></div>
+      </div>
+      <div style="margin-top:12px"><label for="snotes">Notes</label><textarea id="snotes" maxlength="200"></textarea></div>
+      <div class="actions"><button id="startbtn">Start recording</button></div>
+      <div class="msg muted" id="cap"></div>
+    </div>
+    <div id="running" hidden>
+      <div class="big" style="font-size:22px" id="rname"></div>
+      <div class="muted" id="rmeta"></div>
+      <div class="stats" id="rstats"></div>
+      <div class="actions">
+        <button class="danger" id="stopbtn">Stop recording</button>
+        <a class="btn secondary" id="rcsv" href="#">Download CSV so far</a>
+      </div>
+    </div>
+    <div class="msg err" id="smsg"></div>
+  </section>
+
+  <section class="card">
+    <h2 id="charttitle">Chart</h2>
+    <div class="legend"><span><i style="background:var(--temp)"></i>Temperature (°C)</span><span><i style="background:var(--hum)"></i>Humidity (%)</span></div>
+    <svg id="chart" role="img" aria-label="Temperature and humidity over time"></svg>
+    <div class="muted" id="chartnote" style="font-size:13px"></div>
+  </section>
+
+  <section class="card">
+    <h2>Sessions</h2>
+    <div class="tablewrap"><table>
+      <thead><tr><th>#</th><th>Name</th><th>Started</th><th>Duration</th><th>Readings</th><th>Temp min / avg / max</th><th>Hum min / avg / max</th><th></th></tr></thead>
+      <tbody id="sessions"><tr><td colspan="8" class="muted">Loading…</td></tr></tbody>
+    </table></div>
+    <div class="msg muted" id="storage"></div>
+  </section>
+
+  <section class="card">
+    <h2>Calibration and time</h2>
+    <div class="row">
+      <div class="field"><label for="toff">Temperature offset (°C, added to reading)</label><input id="toff" type="number" step="0.1" min="-10" max="10"></div>
+      <div class="field"><label for="hoff">Humidity offset (%RH, added to reading)</label><input id="hoff" type="number" step="0.1" min="-20" max="20"></div>
+    </div>
+    <div class="actions"><button class="secondary" id="calbtn">Save calibration</button></div>
+    <div class="row" style="margin-top:16px">
+      <div class="field"><label for="ntp">NTP server (empty = off)</label><input id="ntp" maxlength="64"></div>
+      <div class="field"><label for="tz">Time zone (POSIX TZ, empty = from browser)</label><input id="tz" maxlength="48" placeholder="CET-1CEST,M3.5.0,M10.5.0/3"></div>
+    </div>
+    <div class="actions"><button class="secondary" id="timebtn">Save time settings</button><button class="secondary" id="syncbtn">Set clock from this browser</button></div>
+    <div class="msg" id="cmsg"></div>
+  </section>
+</main>
+<div id="tip"></div>
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+let status=null,viewId=0,rows=[],nextIndex=0,step=1,viewInfo=null,timeSynced=false,formFilled=false;
+
+async function api(path,opts){
+  const r=await fetch(path,opts);
+  const ct=r.headers.get("content-type")||"";
+  const body=ct.includes("json")?await r.json():await r.text();
+  if(!r.ok) throw new Error((body&&body.message)||("HTTP "+r.status));
+  return body;
+}
+const post=(path,data)=>api(path,data===undefined?{method:"POST"}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function dur(s){s=Math.max(0,Math.round(s));const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);
+  return d?`${d}d ${h}h`:h?`${h}h ${m}m`:m?`${m}m ${s%60}s`:`${s}s`}
+function dt(epoch){return epoch?new Date(epoch*1000).toLocaleString():"–"}
+function bytes(n){return n>1048576?(n/1048576).toFixed(1)+" MB":Math.round(n/1024)+" KB"}
+
+async function syncClock(force){
+  const t=status&&status.time;
+  if(!force&&t&&t.valid&&(t.source==="ntp"||timeSynced))return;
+  try{await post("/api/time/set",{epoch:Math.floor(Date.now()/1000),offset:-new Date().getTimezoneOffset()});timeSynced=true}catch(e){}
+}
+
+function badge(text,cls){return `<span class="badge ${cls}">${esc(text)}</span>`}
+function renderStatus(){
+  const s=status;
+  $("devname").textContent=s.deviceName||"Temperature Logger";
+  document.title=(s.deviceName||"Temperature")+" logger";
+  const r=s.reading;
+  $("t").innerHTML=(r.ok&&r.temperature!==undefined?r.temperature:"--")+"<small> °C</small>";
+  $("h").innerHTML=(r.ok&&r.humidity!==undefined?r.humidity:"--")+"<small> %</small>";
+  const freePct=s.storage.total?s.storage.free/s.storage.total:1;
+  $("badges").innerHTML=
+    badge(r.ok?s.sensor+" OK":s.sensor+" error",r.ok?"ok":"bad")+
+    badge(s.network?"WiFi":"Offline",s.network?"ok":"warn")+
+    badge("Clock: "+s.time.source,s.time.source==="ntp"?"ok":s.time.valid?"warn":"bad")+
+    badge("Storage "+Math.round((1-freePct)*100)+"% used",freePct<0.1?"bad":freePct<0.25?"warn":"ok");
+  $("clock").textContent=s.time.valid?new Date(s.time.epoch*1000).toLocaleString():"not set";
+  $("clocksrc").textContent=s.time.source==="ntp"?"synced via internet (NTP)":s.time.source==="browser"?"set from a browser":"waiting for time";
+  const recs=s.storage.capacityRecords,secs=recs*s.sampleRate/1000;
+  $("cap").textContent=`Space for about ${recs.toLocaleString()} more readings (${dur(secs)} at the current interval).`;
+  $("storage").textContent=`Storage: ${bytes(s.storage.total-s.storage.free)} used of ${bytes(s.storage.total)}.`;
+  if(!formFilled){
+    $("srate").value=s.sampleRate/1000;$("toff").value=s.tempOffset;$("hoff").value=s.humOffset;
+    $("ntp").value=s.time.ntp;$("tz").value=s.time.tz;formFilled=true;
+  }
+  $("idle").hidden=s.active;$("running").hidden=!s.active;
+  if(s.active){
+    const x=s.session;
+    $("rname").textContent=x.name;
+    $("rmeta").textContent=`Recording for ${dur(x.elapsed)} · ${x.count.toLocaleString()} readings every ${x.intervalMs/1000}s`+
+      (x.errors?` · ${x.errors} sensor errors`:"")+(x.resumes?` · resumed after ${x.resumes} restart(s)`:"")+
+      (x.startEpoch?` · started ${dt(x.startEpoch)}`:"");
+    $("rstats").innerHTML=statsHtml(x);
+    $("rcsv").href="/api/session/csv?id="+x.id;
+  }
+}
+function statsHtml(x){
+  if(!x.temp)return "";
+  const c=(l,v,u)=>`<div class="stat"><span class="label">${l}</span><b>${v}${u}</b></div>`;
+  return c("Temp min",x.temp.min," °C")+c("Temp avg",(+x.temp.avg).toFixed(1)," °C")+c("Temp max",x.temp.max," °C")+
+         c("Hum min",x.hum.min," %")+c("Hum avg",(+x.hum.avg).toFixed(1)," %")+c("Hum max",x.hum.max," %");
+}
+
+async function loadSessions(){
+  const d=await api("/api/sessions");
+  const list=d.sessions.sort((a,b)=>b.id-a.id);
+  if(!list.length){$("sessions").innerHTML='<tr><td colspan="8" class="muted">No sessions yet. Start one above.</td></tr>';return list}
+  $("sessions").innerHTML=list.map(x=>{
+    const end=x.active?(status?status.session.elapsed:0):(x.endEpoch&&x.startEpoch?x.endEpoch-x.startEpoch:x.count*x.intervalMs/1000);
+    const st=x.temp?`${x.temp.min} / ${(+x.temp.avg).toFixed(1)} / ${x.temp.max}`:"–";
+    const sh=x.hum?`${x.hum.min} / ${(+x.hum.avg).toFixed(1)} / ${x.hum.max}`:"–";
+    return `<tr><td>${x.id}</td><td title="${esc(x.notes)}">${esc(x.name)}${x.active?' <span class="badge ok">recording</span>':""}</td>
+      <td>${dt(x.startEpoch)}</td><td>${dur(end)}</td><td>${x.count.toLocaleString()}</td><td>${st}</td><td>${sh}</td>
+      <td><button class="secondary" data-view="${x.id}">Chart</button> <a class="btn secondary" style="padding:4px 8px;font-size:13px" href="/api/session/csv?id=${x.id}">CSV</a>
+      ${x.active?"":`<button class="secondary" data-del="${x.id}">Delete</button>`}</td></tr>`}).join("");
+  return list;
+}
+
+async function selectSession(id,info){
+  viewId=id;viewInfo=info||null;rows=[];nextIndex=0;
+  const first=await api(`/api/session/data?id=${id}&from=0&max=1`);
+  step=Math.max(1,Math.ceil(first.count/1500));
+  await fetchRows();
+  $("charttitle").textContent="Chart · "+(info?info.name:"session "+id);
+}
+async function fetchRows(){
+  if(!viewId)return;
+  for(let guard=0;guard<20;guard++){
+    const d=await api(`/api/session/data?id=${viewId}&from=${nextIndex}&step=${step}&max=1500`);
+    rows=rows.concat(d.rows);nextIndex=d.next;
+    if(d.next>=d.count||!d.rows.length)break;
+  }
+  if(rows.length>3000){rows=rows.filter((_,i)=>i%2===0);step*=2}
+  drawChart();
+}
+
+function niceRange(lo,hi){if(!isFinite(lo)){lo=0;hi=1}if(hi-lo<1){const m=(hi+lo)/2;lo=m-0.5;hi=m+0.5}const p=(hi-lo)*0.08;return[lo-p,hi+p]}
+function ticks(lo,hi,n){const raw=(hi-lo)/n,mag=Math.pow(10,Math.floor(Math.log10(raw))),st=[1,2,5,10].map(k=>k*mag).find(k=>k>=raw);
+  const out=[];for(let v=Math.ceil(lo/st)*st;v<=hi+1e-9;v+=st)out.push(+v.toFixed(6));return out}
+function timeTicks(span,n){const nice=[10,30,60,120,300,600,900,1800,3600,7200,10800,21600,43200,86400,172800,604800];
+  const st=nice.find(k=>span/k<=n)||Math.ceil(span/n/86400)*86400;const out=[];for(let v=0;v<=span;v+=st)out.push(v);return out}
+function drawChart(){
+  const svg=$("chart"),W=svg.clientWidth||600,H=300,L=44,R=44,T=10,B=28;
+  const pts=rows.filter(r=>r[2]!==null);
+  if(!pts.length){svg.innerHTML=`<text x="${W/2}" y="${H/2}" text-anchor="middle">${viewId?"No readings yet":"Start a session to see the chart"}</text>`;$("chartnote").textContent="";return}
+  const x0=rows[0][0],x1=Math.max(rows[rows.length-1][0],x0+1);
+  const [t0,t1]=niceRange(Math.min(...pts.map(r=>r[2])),Math.max(...pts.map(r=>r[2])));
+  const [h0,h1]=niceRange(Math.min(...pts.map(r=>r[3])),Math.max(...pts.map(r=>r[3])));
+  const X=v=>L+(v-x0)/(x1-x0)*(W-L-R),YT=v=>T+(t1-v)/(t1-t0)*(H-T-B),YH=v=>T+(h1-v)/(h1-h0)*(H-T-B);
+  let g="";
+  for(const v of ticks(t0,t1,5)){const y=YT(v);g+=`<line x1="${L}" x2="${W-R}" y1="${y}" y2="${y}" stroke="var(--line)"/><text x="${L-6}" y="${y+4}" text-anchor="end" style="fill:var(--temp)">${v}</text>`}
+  for(const v of ticks(h0,h1,5)){g+=`<text x="${W-R+6}" y="${YH(v)+4}" style="fill:var(--hum)">${v}</text>`}
+  for(const v of timeTicks(x1-x0,Math.max(2,Math.floor(W/110)))){const x=X(x0+v);g+=`<text x="${x}" y="${H-8}" text-anchor="middle">${dur(v)}</text>`}
+  // Break the line where the sensor failed
+  const path=(idx,Y)=>{let d="",pen=false;for(const r of rows){if(r[idx]===null){pen=false;continue}d+=(pen?"L":"M")+X(r[0]).toFixed(1)+","+Y(r[idx]).toFixed(1);pen=true}return d};
+  g+=`<path d="${path(3,YH)}" fill="none" stroke="var(--hum)" stroke-width="1.5"/>`;
+  g+=`<path d="${path(2,YT)}" fill="none" stroke="var(--temp)" stroke-width="2"/>`;
+  g+=`<line id="cursor" y1="${T}" y2="${H-B}" stroke="var(--muted)" stroke-dasharray="3 3" visibility="hidden"/>`;
+  svg.setAttribute("viewBox",`0 0 ${W} ${H}`);svg.innerHTML=g;
+  const errs=rows.length-pts.length;
+  $("chartnote").textContent=`${rows.length.toLocaleString()} points shown`+(step>1?` (every ${step}th reading)`:"")+(errs?` · ${errs} sensor errors (gaps)`:"")+". Time axis: time since start.";
+  svg.onmousemove=e=>{
+    const b=svg.getBoundingClientRect(),xv=x0+(e.clientX-b.left-L)/(b.width-L-R)*(x1-x0);
+    let best=rows[0];for(const r of rows)if(Math.abs(r[0]-xv)<Math.abs(best[0]-xv))best=r;
+    const c=$("cursor");c.setAttribute("x1",X(best[0]));c.setAttribute("x2",X(best[0]));c.setAttribute("visibility","visible");
+    const tip=$("tip");tip.style.display="block";tip.style.left=Math.min(e.clientX+12,innerWidth-180)+"px";tip.style.top=(e.clientY+12)+"px";
+    tip.innerHTML=`${best[1]?new Date(best[1]*1000).toLocaleString():"+"+dur(best[0])}<br><b style="color:var(--temp)">${best[2]===null?"error":best[2]+" °C"}</b> · <b style="color:var(--hum)">${best[3]===null?"error":best[3]+" %"}</b>`};
+  svg.onmouseleave=()=>{$("tip").style.display="none";const c=$("cursor");if(c)c.setAttribute("visibility","hidden")};
+}
+
+async function refresh(){
+  try{
+    const prevActive=status&&status.active;
+    status=await api("/api/logger/status");
+    renderStatus();
+    await syncClock(false);
+    if(status.active&&(!viewId||!prevActive)){await selectSession(status.session.id,status.session);await loadSessions()}
+    else if(status.active&&viewId===status.session.id){await fetchRows()}
+    if(prevActive!==undefined&&prevActive!==status.active)await loadSessions();
+  }catch(e){$("smsg").textContent="Device not reachable: "+e.message}
+}
+
+$("startbtn").onclick=async()=>{
+  $("smsg").textContent="";
+  try{await syncClock(true);
+    await post("/api/session/start",{name:$("sname").value.trim(),notes:$("snotes").value.trim(),rate:Math.round(+$("srate").value*1000)});
+    $("sname").value="";$("snotes").value="";viewId=0;await refresh();await loadSessions()}catch(e){$("smsg").textContent=e.message}
+};
+$("stopbtn").onclick=async()=>{
+  if(!confirm("Stop recording this session?"))return;
+  try{await post("/api/session/stop");await refresh();await loadSessions()}catch(e){$("smsg").textContent=e.message}
+};
+$("sessions").onclick=async e=>{
+  const v=e.target.dataset.view,d=e.target.dataset.del;
+  if(v){const list=await loadSessions();await selectSession(+v,list.find(x=>x.id==v));$("chart").scrollIntoView({behavior:"smooth"})}
+  if(d&&confirm("Delete session "+d+" and all its readings?")){try{await post("/api/session/delete?id="+d);if(viewId==d){viewId=0;rows=[];drawChart()}await loadSessions();await refresh()}catch(err){alert(err.message)}}
+};
+function cmsg(t,err){$("cmsg").textContent=t;$("cmsg").className="msg"+(err?" err":"")}
+$("calbtn").onclick=async()=>{try{await post("/api/config/calibration/set",{temp:+$("toff").value||0,hum:+$("hoff").value||0});cmsg("Calibration saved. It applies to new readings.")}catch(e){cmsg(e.message,true)}};
+$("timebtn").onclick=async()=>{try{await post("/api/config/time/set",{ntp:$("ntp").value.trim(),tz:$("tz").value.trim()});cmsg("Time settings saved.");formFilled=false;await refresh()}catch(e){cmsg(e.message,true)}};
+$("syncbtn").onclick=async()=>{await syncClock(true);cmsg("Clock set from this browser (kept if internet time is available).");refresh()};
+addEventListener("resize",()=>drawChart());
+
+(async()=>{await refresh();await loadSessions();if(!viewId)drawChart();
+  setInterval(refresh,Math.max(3000,Math.min(10000,status?status.sampleRate:5000)))})();
+</script>
+</body>
+</html>

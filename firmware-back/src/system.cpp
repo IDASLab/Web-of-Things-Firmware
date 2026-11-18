@@ -1,5 +1,6 @@
 #include "system.h"
 #include "configManager.h"
+#include "logger.h"
 
 void SystemControl::requestRestart(uint32_t delayMs)
 {
@@ -18,6 +19,8 @@ void SystemControl::loop()
 {
     if (!restartPending || (int32_t)(millis() - at) < 0)
         return;
+
+    logger.flushNow(); // the running session continues after the restart
 
     if (resetPending)
     {

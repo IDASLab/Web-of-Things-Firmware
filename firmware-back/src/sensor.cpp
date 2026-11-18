@@ -76,6 +76,9 @@ void DHTSensor::finishSample(bool ok, float t, float h, uint32_t now)
 {
     if (ok)
     {
+        // Calibration offsets from the settings
+        t += configManager.sensorConfigData.tempOffset;
+        h = constrain(h + configManager.sensorConfigData.humOffset, 0.0f, 100.0f);
         lastTemperature = t;
         lastHumidity = h;
         lastGoodMillis = now;

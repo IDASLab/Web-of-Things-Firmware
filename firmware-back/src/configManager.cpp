@@ -30,6 +30,7 @@ void config::loadDefaults()
     memcpy(&sensorConfigData, &sensorDefaults, sizeof(sensorConfigData));
     memcpy(&brokerConfigData, &brokerDefaults, sizeof(brokerConfigData));
     memcpy(&admin, &adminDefaults, sizeof(admin));
+    memcpy(&timeConfig, &timeDefaults, sizeof(timeConfig));
     internal = networkData();
 }
 
@@ -93,6 +94,13 @@ bool config::load()
     sensorConfigData.model = s["model"] | sensorDefaults.model;
     sensorConfigData.gpio = s["gpio"] | sensorDefaults.gpio;
     sensorConfigData.sampleRate = constrain(s["sampleRate"] | sensorDefaults.sampleRate, SAMPLE_RATE_MIN_MS, SAMPLE_RATE_MAX_MS);
+    sensorConfigData.tempOffset = constrain(s["tempOffset"] | 0.0f, -TEMP_OFFSET_MAX, TEMP_OFFSET_MAX);
+    sensorConfigData.humOffset = constrain(s["humOffset"] | 0.0f, -HUM_OFFSET_MAX, HUM_OFFSET_MAX);
+
+    JsonObjectConst t = doc["time"];
+    if (t["ntp"].is<const char *>())
+        readStr(t["ntp"], timeConfig.ntpServer, sizeof(timeConfig.ntpServer));
+    readStr(t["tz"], timeConfig.tz, sizeof(timeConfig.tz));
 
     JsonObjectConst b = doc["broker"];
     brokerConfigData.publishRequest = b["enabled"] | false;
@@ -128,6 +136,12 @@ bool config::save()
     s["model"] = sensorConfigData.model;
     s["gpio"] = sensorConfigData.gpio;
     s["sampleRate"] = sensorConfigData.sampleRate;
+    s["tempOffset"] = sensorConfigData.tempOffset;
+    s["humOffset"] = sensorConfigData.humOffset;
+
+    JsonObject t = doc["time"].to<JsonObject>();
+    t["ntp"] = timeConfig.ntpServer;
+    t["tz"] = timeConfig.tz;
 
     JsonObject b = doc["broker"].to<JsonObject>();
     b["enabled"] = brokerConfigData.publishRequest;
@@ -169,6 +183,7 @@ void config::reset()
 {
     loadDefaults();
     brokerRev++;
+    timeRev++;
     save();
 }
 
@@ -278,6 +293,55 @@ bool config::setBrokerConfig(bool status, const char *addr, uint16_t port, const
     brokerRev++;
     saveRequested = true;
     return true;
+}
+
+bool config::setCalibration(float tempOffset, float humOffset, String &error)
+{
+    if (isnan(tempOffset) || isnan(humOffset) || fabsf(tempOffset) > TEMP_OFFSET_MAX || fabsf(humOffset) > HUM_OFFSET_MAX)
+    {
+        error = F("Offsets must be within +/-10 C and +/-20 %RH");
+        return false;
+    }
+    sensorConfigData.tempOffset = tempOffset;
+    sensorConfigData.humOffset = humOffset;
+    saveRequested = true;
+    return true;
+}
+
+static bool validTZ(const char *tz)
+{
+    // POSIX TZ: printable ASCII, no spaces. Full syntax is checked by the C library.
+    for (const char *p = tz; *p; p++)
+        if (*p <= ' ' || *p > '~')
+            return false;
+    return true;
+}
+
+bool config::setTimeConfig(const char *ntpServer, const char *tz, String &error)
+{
+    timeData next = timeConfig;
+    if (!copyField(next.ntpServer, sizeof(next.ntpServer), ntpServer ? ntpServer : ""))
+    {
+        error = F("NTP server must be at most 64 characters");
+        return false;
+    }
+    if (!copyField(next.tz, sizeof(next.tz), tz ? tz : "") || !validTZ(next.tz))
+    {
+        error = F("Time zone must be a POSIX TZ string of at most 48 characters, without spaces");
+        return false;
+    }
+    timeConfig = next;
+    timeRev++;
+    saveRequested = true;
+    return true;
+}
+
+void config::setAutoTimezone(const char *tz)
+{
+    if (timeConfig.tz[0] != '\0' || !copyField(timeConfig.tz, sizeof(timeConfig.tz), tz))
+        return;
+    timeRev++;
+    saveRequested = true;
 }
 
 bool config::setAdminPassword(const char *current, const char *password, String &error)
