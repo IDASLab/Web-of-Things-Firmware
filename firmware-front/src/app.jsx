@@ -13,8 +13,8 @@ const PAGES = [
     { path: "/system", title: "System", Page: SystemPage },
 ];
 
-// Old links (/config, /setting) from the previous interface
-const ALIASES = { "/config": "/settings", "/setting": "/system" };
+// Old links (/config, /network, /setting) from the previous interface
+const ALIASES = { "/config": "/settings", "/setting": "/system", "/network": "/network" };
 
 // Hash routing (#/network) works on any server path, including the captive portal.
 function useRoute() {
