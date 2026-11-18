@@ -84,6 +84,60 @@ Basic auth is not encrypted, so use the device on a trusted network.
 
 The user interface of WoT firmware is developed on [Preact JS](https://preactjs.com/) framework. To change UI dashboard, you should develop `/firmware-front` and then applying modifications by this command `npm run build`. New `html.h` file is automatically replaced by previous version. While developing the UI on another origin, build the firmware with `-DWOT_ENABLE_CORS` (see `platformio.ini`); do not ship that build.
 
+## Experiment logger
+
+Open `http://<device-ip>/` to use the logger page. It shows:
+
+- the current temperature and humidity
+- a **Start recording** form (name, notes, sample interval) and a **Stop** button
+- a live chart of the running session, with min / average / max
+- every saved session, with **Chart**, **CSV** download and **Delete**
+- calibration offsets and time settings
+
+The original settings pages are still at `/config`, `/network` and `/setting`.
+
+### How recording works
+
+- Readings go to the device's flash (`/logs/<id>.bin`, 12 bytes each). The 2 MB file system holds about 160,000 readings. That is roughly 18 days at a 10 s interval, or 110 days at 60 s. The page shows how much space is left.
+- Readings are written in batches, every 32 readings or 2 minutes, to limit flash wear. A power cut loses at most the last batch.
+- If the device restarts during a session, recording continues in the same session after boot.
+- A failed sensor read is saved as a `sensor_error` row, so gaps show up in the data instead of fake values.
+- Logging stops by itself when the flash is almost full.
+
+### Time
+
+- With internet access the clock is set by NTP (`pool.ntp.org` by default).
+- Without internet, opening the logger page sets the device clock from your browser, including your time zone's UTC offset. Open the page once before starting a session so readings get real timestamps. If the clock is set later, timestamps are filled in from the session start.
+- For daylight saving time, enter a POSIX time zone, for example `CET-1CEST,M3.5.0,M10.5.0/3`.
+
+### CSV format
+
+```
+time_local,unix_time,elapsed_s,temperature_c,humidity_pct,status
+2026-11-18T11:50:05+03:30,1794990005,0,24.7,41.0,ok
+2026-11-18T11:50:15+03:30,1794990015,10,,,sensor_error
+```
+
+`time_local` is empty when the clock was not set. Calibration offsets are applied before readings are saved, and the offsets used are stored with each session.
+
+### Logger API
+
+HTTP Verb |API                              | Request Body Value   | Description
+----------|---------------------------------|----------------------|------------
+GET       |/api/logger/status               | {}                   | Current reading, clock, storage, running session
+POST      |/api/session/start               | { "name": "Test 1", "notes": "", "rate": 10000 } | Start a session (`rate` in ms is optional)
+POST      |/api/session/stop                | {}                   | Stop the running session
+GET       |/api/sessions                    | {}                   | List sessions with stats
+GET       |/api/session/data?id=N&from=0&step=1&max=2000 | {}       | Readings as JSON rows `[elapsed_s, unix_time, temp, hum]`
+GET       |/api/session/csv?id=N            | {}                   | Download a session as CSV
+POST      |/api/session/delete?id=N         | {}                   | Delete a stopped session
+GET       |/api/time                        | {}                   | Clock status
+POST      |/api/time/set                    | { "epoch": 1794990005, "offset": 210 } | Set the clock (offset = minutes east of UTC)
+POST      |/api/config/time/set             | { "ntp": "pool.ntp.org", "tz": "UTC0" } | NTP server and POSIX time zone
+POST      |/api/config/calibration/set      | { "temp": -0.5, "hum": 2.0 } | Calibration offsets (±10 °C, ±20 %RH)
+
+After editing `firmware-back/web/logger.html`, run `python3 firmware-back/tools/embed_html.py` to regenerate `src/default/logger_html.h`.
+
 ## APIs Endpoint
 
 ### REST APIs
@@ -164,6 +218,8 @@ The classes functionalities and responsibility are detailed in the following.
 - `src/sensor.cpp`: Creating sensor object from DHT library, reading data from sensor and storing them in temporary memory are main activities of this class.  
 - `src/dashboard.cpp`: This class is responsible for preparing dashboard items and representing them by WebSocket connection into firmware UI.
 - `src/updater.cpp`: WoT firmware has been able to Over-The-Air update functionality by this class.
+- `src/logger.cpp`: Experiment sessions: start/stop, batched writes to flash, resume after reboot, stats, reading back for chart and CSV.
+- `src/timeSync.cpp`: Wall-clock time from NTP or the browser, and the time zone.
 - `src/system.cpp`: Runs restart and factory reset requests from the main loop, after the HTTP reply is sent.
 
 ```
@@ -172,8 +228,11 @@ firmware-back/src/
           config.cpp
           config.h
           html.h
+          logger_html.h   (generated from web/logger.html)
      configManager.cpp
      configManager.h
+     logger.cpp
+     logger.h
      dashboard.cpp
      dashboard.h
      main.cpp
@@ -183,6 +242,8 @@ firmware-back/src/
      sensor.h
      system.cpp
      system.h
+     timeSync.cpp
+     timeSync.h
      updater.cpp
      updater.h
      webServer.cpp

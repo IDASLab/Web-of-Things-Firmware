@@ -9,6 +9,8 @@
 #include "dashboard.h"
 #include "sensor.h"
 #include "system.h"
+#include "timeSync.h"
+#include "logger.h"
 
 void setup()
 {
@@ -25,17 +27,20 @@ void setup()
     }
 
     configManager.begin();
+    timeSync.begin();
     WiFiManager.begin();
     server.begin();
     dash.begin();
     mqttPublisher.begin();
     dhtsensor.begin(configManager.sensorConfigData.gpio, configManager.sensorConfigData.model);
+    logger.begin(); // resumes a session that was running before a reboot
 }
 
 void loop()
 {
     configManager.loop();
     WiFiManager.loop();
+    timeSync.loop();
     updater.loop();
     dhtsensor.loop();
 
@@ -49,7 +54,10 @@ void loop()
         dash.send();
         if (dhtsensor.ok())
             mqttPublisher.publish(dhtsensor.temperature(), dhtsensor.humidity());
+        logger.addSample(dhtsensor.ok(), dhtsensor.temperature(), dhtsensor.humidity());
     }
+
+    logger.loop();
 
     mqttPublisher.loop();
     dash.loop();

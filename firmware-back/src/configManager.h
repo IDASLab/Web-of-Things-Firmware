@@ -18,6 +18,7 @@ public:
     brokerData brokerConfigData;
     networkData internal; // station static IP
     adminData admin;
+    timeData timeConfig;
 
     // Call after LittleFS.begin(). Returns false if defaults had to be used.
     bool begin();
@@ -35,6 +36,10 @@ public:
                                const char *ip, const char *sub, const char *gw, String &error);
     bool setSensorConfig(uint32_t sampleRate, String &error);
     bool setBrokerConfig(bool status, const char *addr, uint16_t port, const char *topic, uint8_t qos, String &error);
+    bool setCalibration(float tempOffset, float humOffset, String &error);
+    bool setTimeConfig(const char *ntpServer, const char *tz, String &error);
+    // Sets the TZ only if none was configured (used for the browser fallback).
+    void setAutoTimezone(const char *tz);
     bool setAdminPassword(const char *current, const char *password, String &error);
     void setStationStaticIP(uint32_t ip, uint32_t gw, uint32_t sub, uint32_t dns);
 
@@ -44,10 +49,13 @@ public:
 
     // Bumped on every successful broker change so the publisher can reconnect.
     uint32_t brokerRevision() const { return brokerRev; }
+    // Bumped when NTP server or time zone change.
+    uint32_t timeRevision() const { return timeRev; }
 
 private:
     bool saveRequested = false;
     uint32_t brokerRev = 0;
+    uint32_t timeRev = 0;
 
     void loadDefaults();
     bool load();

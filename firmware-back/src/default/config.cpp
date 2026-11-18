@@ -13,7 +13,14 @@ const deviceData deviceDefaults = {
 const sensorData sensorDefaults = {
 	11,   // DHT11
 	5,    // GPIO 5 (D1)
-	5000  // 5 s
+	5000, // 5 s
+	0.0f, // temperature offset
+	0.0f  // humidity offset
+};
+
+const timeData timeDefaults = {
+	"pool.ntp.org",
+	""   // taken from the browser's UTC offset on first time sync
 };
 
 const brokerData brokerDefaults = {

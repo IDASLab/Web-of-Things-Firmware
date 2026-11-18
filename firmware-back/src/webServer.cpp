@@ -12,6 +12,10 @@
 #include "sensor.h"
 #include "dashboard.h"
 #include "system.h"
+#include "logger.h"
+#include "timeSync.h"
+#include "default/logger_html.h"
+#include <memory>
 
 // Define WOT_ENABLE_CORS (build flag) only while developing the front end
 // on another origin. It weakens the protection against malicious web pages.
@@ -79,6 +83,118 @@ static void onJson(AsyncWebServer &srv, const char *uri, std::function<void(Asyn
     h->setMethod(HTTP_POST);
     h->setMaxContentLength(1024);
     srv.addHandler(h);
+}
+
+
+// ---- Logger helpers -------------------------------------------------------
+
+static void sessionToJson(JsonObject o, const SessionInfo &s)
+{
+    o["id"] = s.id;
+    o["name"] = s.name;
+    o["notes"] = s.notes;
+    o["active"] = s.active;
+    o["startEpoch"] = s.startEpoch;
+    o["endEpoch"] = s.endEpoch;
+    o["intervalMs"] = s.intervalMs;
+    o["tempOffset"] = s.tempOffset;
+    o["humOffset"] = s.humOffset;
+    o["resumes"] = s.resumes;
+    o["errors"] = s.errors;
+    o["stopReason"] = s.stopReason;
+    o["count"] = logger.recordCount(s.id);
+    if (s.temp.n)
+    {
+        JsonObject t = o["temp"].to<JsonObject>();
+        t["min"] = serialized(String(s.temp.min, 1));
+        t["max"] = serialized(String(s.temp.max, 1));
+        t["avg"] = serialized(String(s.temp.sum / s.temp.n, 2));
+        JsonObject h = o["hum"].to<JsonObject>();
+        h["min"] = serialized(String(s.hum.min, 1));
+        h["max"] = serialized(String(s.hum.max, 1));
+        h["avg"] = serialized(String(s.hum.sum / s.hum.n, 2));
+    }
+}
+
+static void timeToJson(JsonObject o)
+{
+    o["valid"] = timeSync.valid();
+    o["epoch"] = (uint32_t)timeSync.now();
+    if (timeSync.valid())
+        o["local"] = TimeSync::formatLocal(timeSync.now());
+    o["source"] = timeSync.sourceName();
+    o["tz"] = configManager.timeConfig.tz;
+    o["ntp"] = configManager.timeConfig.ntpServer;
+}
+
+static void fmt10(char *dst, size_t n, int v)
+{
+    // v is a value x10, printed with one decimal
+    snprintf_P(dst, n, PSTR("%s%d.%d"), v < 0 ? "-" : "", abs(v) / 10, abs(v) % 10);
+}
+
+// Streams rows of a session without building the whole response in RAM.
+struct RowStream
+{
+    uint32_t id, next, end, step;
+    bool headerDone = false, footerDone = false;
+    String pending;
+    std::function<String(const LogRecord &)> row;
+    String header, footer;
+};
+
+static AsyncWebServerResponse *streamRows(AsyncWebServerRequest *request, const char *type, std::shared_ptr<RowStream> st)
+{
+    return request->beginChunkedResponse(type, [st](uint8_t *buf, size_t maxLen, size_t) -> size_t {
+        size_t used = 0;
+        auto put = [&](const String &text) -> bool {
+            if (text.length() > maxLen - used)
+                return false;
+            memcpy(buf + used, text.c_str(), text.length());
+            used += text.length();
+            return true;
+        };
+        if (st->pending.length())
+        {
+            if (!put(st->pending))
+            {
+                // Larger than a whole chunk: should not happen with short rows.
+                st->pending = "";
+                return 0;
+            }
+            st->pending = "";
+        }
+        if (!st->headerDone)
+        {
+            if (!put(st->header))
+                return used;
+            st->headerDone = true;
+        }
+        while (st->next < st->end && used < maxLen)
+        {
+            LogRecord r;
+            uint32_t idx = st->next;
+            st->next += st->step;
+            if (!logger.readRecord(st->id, idx, r))
+            {
+                st->next = st->end;
+                break;
+            }
+            String line = st->row(r);
+            if (!put(line))
+            {
+                st->pending = line;
+                return used;
+            }
+        }
+        if (st->next >= st->end && !st->footerDone)
+        {
+            if (!put(st->footer))
+                return used;
+            st->footerDone = true;
+        }
+        return used;
+    });
 }
 
 void webServer::checkSameOrigin(AsyncWebServerRequest *request, ArMiddlewareNext next)
@@ -247,6 +363,212 @@ void webServer::bindAll()
         serializeJson(doc, out);
         request->send(200, JSON_TYPE, out);
     });
+
+
+    // ---- Time and calibration --------------------------------------------
+
+    server.on("/api/time", HTTP_GET, [](AsyncWebServerRequest *request) {
+        JsonDocument doc;
+        timeToJson(doc.to<JsonObject>());
+        String out;
+        serializeJson(doc, out);
+        request->send(200, JSON_TYPE, out);
+    });
+
+    onJson(server, "/api/time/set", [](AsyncWebServerRequest *request, JsonObjectConst doc) {
+        if (!doc["epoch"].is<uint32_t>())
+            return sendError(request, 400, F("epoch (unix seconds) is required"));
+        if (!timeSync.setFromBrowser(doc["epoch"].as<uint32_t>(), doc["offset"] | 0))
+            return sendError(request, 400, F("Invalid time"));
+        sendOk(request, "Time set");
+    });
+
+    onJson(server, "/api/config/time/set", [](AsyncWebServerRequest *request, JsonObjectConst doc) {
+        String error;
+        if (!configManager.setTimeConfig(str(doc["ntp"]), str(doc["tz"]), error))
+            return sendError(request, 400, error);
+        sendOk(request);
+    });
+
+    onJson(server, "/api/config/calibration/set", [](AsyncWebServerRequest *request, JsonObjectConst doc) {
+        String error;
+        if (!doc["temp"].is<float>() || !doc["hum"].is<float>())
+            return sendError(request, 400, F("temp and hum offsets are required"));
+        if (!configManager.setCalibration(doc["temp"].as<float>(), doc["hum"].as<float>(), error))
+            return sendError(request, 400, error);
+        sendOk(request);
+    });
+
+    // ---- Experiment sessions ---------------------------------------------
+
+    server.on("/api/logger/status", HTTP_GET, [](AsyncWebServerRequest *request) {
+        JsonDocument doc;
+        doc["firmwareVer"] = FIRMWARE_VERSION;
+        doc["deviceName"] = configManager.deviceConfigData.deviceName;
+        doc["sensor"] = dhtsensor.sensorType();
+        doc["sampleRate"] = configManager.sensorConfigData.sampleRate;
+        doc["tempOffset"] = configManager.sensorConfigData.tempOffset;
+        doc["humOffset"] = configManager.sensorConfigData.humOffset;
+        JsonObject now = doc["reading"].to<JsonObject>();
+        now["ok"] = dhtsensor.ok();
+        if (!isnan(dhtsensor.temperature()))
+        {
+            now["temperature"] = serialized(String(dhtsensor.temperature(), 1));
+            now["humidity"] = serialized(String(dhtsensor.humidity(), 1));
+            now["ageS"] = dhtsensor.ageMs() / 1000;
+        }
+        now["errors"] = dhtsensor.errorCount();
+        timeToJson(doc["time"].to<JsonObject>());
+        JsonObject st = doc["storage"].to<JsonObject>();
+        st["free"] = logger.freeBytes();
+        st["total"] = logger.totalBytes();
+        st["capacityRecords"] = logger.capacityRecords();
+        doc["active"] = logger.active();
+        if (logger.active())
+        {
+            sessionToJson(doc["session"].to<JsonObject>(), logger.activeSession());
+            doc["session"]["elapsed"] = logger.elapsedNow();
+        }
+        doc["network"] = WiFiManager.isConnected();
+        doc["broker"] = mqttPublisher.connected();
+        String out;
+        serializeJson(doc, out);
+        request->send(200, JSON_TYPE, out);
+    });
+
+    onJson(server, "/api/session/start", [](AsyncWebServerRequest *request, JsonObjectConst doc) {
+        String error;
+        if (doc["rate"].is<uint32_t>() && !configManager.setSensorConfig(doc["rate"].as<uint32_t>(), error))
+            return sendError(request, 400, error);
+        if (!logger.start(str(doc["name"]), str(doc["notes"]), error))
+            return sendError(request, 409, error);
+        sendOk(request, "Session started");
+    });
+
+    server.on("/api/session/stop", HTTP_POST, [](AsyncWebServerRequest *request) {
+        if (!logger.active())
+            return sendError(request, 409, F("No session is running"));
+        logger.stop();
+        sendOk(request, "Session stopped");
+    });
+
+    server.on("/api/session/delete", HTTP_POST, [](AsyncWebServerRequest *request) {
+        String error;
+        if (!logger.remove(request->arg("id").toInt(), error))
+            return sendError(request, 400, error);
+        sendOk(request, "Session deleted");
+    });
+
+    server.on("/api/sessions", HTTP_GET, [](AsyncWebServerRequest *request) {
+        // Streamed as built: the list can get long.
+        AsyncResponseStream *response = request->beginResponseStream(JSON_TYPE);
+        response->print("{\"sessions\":[");
+        bool first = true;
+        logger.forEachSession([&](const SessionInfo &s) {
+            JsonDocument doc;
+            sessionToJson(doc.to<JsonObject>(), s);
+            if (!first)
+                response->print(',');
+            first = false;
+            serializeJson(doc, *response);
+        });
+        response->print("]}");
+        request->send(response);
+    });
+
+    // Readings as JSON for the chart:
+    //   ?id=N&from=0&step=1&max=2000 -> {"id":N,"count":C,"next":I,"rows":[[elapsed,epoch,t,h],...]}
+    server.on("/api/session/data", HTTP_GET, [](AsyncWebServerRequest *request) {
+        uint32_t id = request->arg("id").toInt();
+        SessionInfo info;
+        bool isActive = logger.active() && logger.activeSession().id == id;
+        if (!isActive && !logger.loadInfo(id, info))
+            return sendError(request, 404, F("Session not found"));
+        uint32_t count = logger.recordCount(id);
+        uint32_t from = request->hasArg("from") ? request->arg("from").toInt() : 0;
+        uint32_t step = max<long>(1, request->hasArg("step") ? request->arg("step").toInt() : 1);
+        uint32_t maxRows = constrain(request->hasArg("max") ? request->arg("max").toInt() : 2000, 1, 5000);
+        if (from > count)
+            from = count;
+        uint64_t endWanted = (uint64_t)from + (uint64_t)maxRows * step;
+        uint32_t end = endWanted < count ? (uint32_t)endWanted : count;
+        uint32_t rows = end > from ? (end - from + step - 1) / step : 0;
+        uint32_t next = from + rows * step;
+
+        auto st = std::make_shared<RowStream>();
+        st->id = id;
+        st->next = from;
+        st->end = end;
+        st->step = step;
+        st->header = String(F("{\"id\":")) + id + F(",\"count\":") + count + F(",\"next\":") + next + F(",\"rows\":[");
+        st->footer = "]}";
+        std::shared_ptr<bool> firstRow = std::make_shared<bool>(true);
+        st->row = [firstRow](const LogRecord &r) {
+            char t[12] = "null", h[12] = "null";
+            if (r.ok())
+            {
+                fmt10(t, sizeof(t), r.t10);
+                fmt10(h, sizeof(h), r.h10);
+            }
+            char line[64];
+            snprintf_P(line, sizeof(line), PSTR("%s[%u,%u,%s,%s]"), *firstRow ? "" : ",", r.elapsed, r.epoch, t, h);
+            *firstRow = false;
+            return String(line);
+        };
+        request->send(streamRows(request, JSON_TYPE, st));
+    });
+
+    // CSV export: ?id=N
+    server.on("/api/session/csv", HTTP_GET, [](AsyncWebServerRequest *request) {
+        uint32_t id = request->arg("id").toInt();
+        SessionInfo info;
+        bool isActive = logger.active() && logger.activeSession().id == id;
+        if (isActive)
+            info = logger.activeSession();
+        else if (!logger.loadInfo(id, info))
+            return sendError(request, 404, F("Session not found"));
+
+        auto st = std::make_shared<RowStream>();
+        st->id = id;
+        st->next = 0;
+        st->end = logger.recordCount(id);
+        st->step = 1;
+        st->header = F("time_local,unix_time,elapsed_s,temperature_c,humidity_pct,status\r\n");
+        uint32_t startEpoch = info.startEpoch;
+        st->row = [startEpoch](const LogRecord &r) {
+            uint32_t epoch = r.epoch ? r.epoch : (startEpoch ? startEpoch + r.elapsed : 0);
+            String local = epoch ? TimeSync::formatLocal(epoch) : String();
+            char t[12] = "", h[12] = "";
+            if (r.ok())
+            {
+                fmt10(t, sizeof(t), r.t10);
+                fmt10(h, sizeof(h), r.h10);
+            }
+            char line[112];
+            snprintf_P(line, sizeof(line), PSTR("%s,%s,%u,%s,%s,%s\r\n"), local.c_str(),
+                       epoch ? String(epoch).c_str() : "", r.elapsed, t, h, r.ok() ? "ok" : "sensor_error");
+            return String(line);
+        };
+
+        // File name from the session name, safe characters only
+        String fname = String(F("session-")) + id + "-";
+        for (const char *p = info.name; *p && fname.length() < 60; p++)
+            fname += (isalnum(*p) || *p == '-' || *p == '_') ? *p : '_';
+        fname += ".csv";
+
+        AsyncWebServerResponse *response = streamRows(request, "text/csv", st);
+        response->addHeader("Content-Disposition", String(F("attachment; filename=\"")) + fname + "\"");
+        request->send(response);
+    });
+
+    // Logger page
+    auto servePage = [](AsyncWebServerRequest *request) {
+        AsyncWebServerResponse *response = request->beginResponse_P(200, "text/html", logger_html, logger_html_len);
+        response->addHeader("Content-Encoding", "gzip");
+        request->send(response);
+    };
+    server.on("/", HTTP_GET, servePage);
+    server.on("/logger", HTTP_GET, servePage);
 
     // ---- Device ----------------------------------------------------------
 

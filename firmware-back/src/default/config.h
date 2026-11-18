@@ -6,7 +6,7 @@
 // Firmware identity. Compiled in (not stored in flash) so it is always
 // correct after an update.
 #define FIRMWARE_NAME "Helenor"
-#define FIRMWARE_VERSION "v1.1.0"
+#define FIRMWARE_VERSION "v1.2.0"
 
 // Field sizes include the terminating NUL.
 #define LEN_NAME 33
@@ -48,6 +48,18 @@ struct sensorData
     uint8_t model;       // 11 = DHT11, 21 = DHT21, 22 = DHT22
     uint8_t gpio;
     uint32_t sampleRate; // milliseconds
+    float tempOffset;    // calibration, added to the raw reading (degrees C)
+    float humOffset;     // calibration, added to the raw reading (% RH)
+};
+
+#define LEN_TZ 49
+#define TEMP_OFFSET_MAX 10.0f
+#define HUM_OFFSET_MAX 20.0f
+
+struct timeData
+{
+    char ntpServer[LEN_HOST]; // empty = NTP off
+    char tz[LEN_TZ];          // POSIX TZ string, e.g. "CET-1CEST,M3.5.0,M10.5.0/3"; empty = set from the browser
 };
 
 struct brokerData
@@ -68,6 +80,7 @@ extern const deviceData deviceDefaults;
 extern const sensorData sensorDefaults;
 extern const brokerData brokerDefaults;
 extern const adminData adminDefaults;
+extern const timeData timeDefaults;
 
 #define ADMIN_USER "admin"
 
