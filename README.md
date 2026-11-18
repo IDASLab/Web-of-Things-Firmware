@@ -57,15 +57,38 @@ Follow this instruction according [schematic](#Hardware-Schematic) image to setu
 5. At this step you should build the program and then upload it on the Wemos, according below.
 
 ### Configuration
-To configure or change default values, you should modify the values of `config.cpp` in `/firmware-back/src/default`.
+Default values live in `/firmware-back/src/default/config.cpp`. Settings changed from the web UI are saved as JSON in the device file system (`/sys/config.json`), so they survive restarts and firmware updates. On first boot after upgrading from v1.0, settings stored by the old firmware in EEPROM are imported automatically.
 
-If you want to use other models of DHT sensor or set another GPIO for working, you should modify defining values `SensorModel` and `SensorGPIO` in the `main.cpp`.
+The sensor model and GPIO are read from the saved settings (defaults: DHT11 on GPIO 5).
 
-The user interface of WoT firmware is developed on [Preact JS](https://preactjs.com/) framework. To change UI dashboard, you should develop `/firmware-front` and then applying modifications by this command `npm run build`. New `html.h` file is automatically replaced by previous version.
+#### First start
+
+1. If the device cannot join a WiFi network, it opens an access point named `WoT-XXXXXX` (unique per device), password `12345678`. Connect to it and open `http://192.168.4.1`.
+2. Log in with user `admin` and password `admin`.
+3. Change the admin password straight away:
+   ```
+   curl -u admin:admin -H "Content-Type: application/json" \
+        -d '{"current":"admin","password":"your-new-password"}' \
+        http://<device-ip>/api/config/admin/set
+   ```
+4. Set your WiFi network on the Network page. If the network is not available at boot or drops later, the device keeps retrying in the background and opens the access point after a while so it stays reachable.
+
+#### Security
+
+- Every page and API endpoint requires the admin login (HTTP Basic auth).
+- Requests that change state are rejected when they come from another website (cross-site request protection), so a web page you visit cannot reset or reflash the device.
+- Passwords are never returned by the API. Leave a password field empty to keep the current one.
+- The access point password must be 8 to 63 characters.
+
+Basic auth is not encrypted, so use the device on a trusted network.
+
+The user interface of WoT firmware is developed on [Preact JS](https://preactjs.com/) framework. To change UI dashboard, you should develop `/firmware-front` and then applying modifications by this command `npm run build`. New `html.h` file is automatically replaced by previous version. While developing the UI on another origin, build the firmware with `-DWOT_ENABLE_CORS` (see `platformio.ini`); do not ship that build.
 
 ## APIs Endpoint
 
 ### REST APIs
+
+All endpoints require HTTP Basic auth (user `admin`). JSON endpoints require `Content-Type: application/json`. Invalid values are rejected with HTTP 400 and a message.
 
 HTTP Verb |API                            | Request Body Value   | Description   
 ----------|-------------------------------| -------------------- |------------
@@ -75,18 +98,27 @@ POST      |/api/reset                     | {}                   | Reset device 
 GET       |/api/config/get                | {}                   | Get configuration data
 POST      |/api/config/device/set         | { "name": "WoT", "ssid": "WoT AP", "pass":"wot1234567"} | Set device configuration
 POST      |/api/config/device/setStatic   | { "name": "WoT", "ssid": "WoT AP", "pass": "wot1234567", "ip": "192.168.1.1", "subnet": "255.255.255.0", "gateway": "192.168.1.1" }             | Set captive portal configuration by static address 
-POST      |/api/config/sensor/set         | { "rate": 5000 }     | Set sensor configuration
-POST      |/api/config/broker/set         | { "ip": "192.168.1.100", "port": 1883, "topic": "/temperature", "qos": 0 }                                                                | Get humidity status
+POST      |/api/config/sensor/set         | { "rate": 5000 }     | Set sample interval in ms (2000 to 3600000)
+POST      |/api/config/broker/set         | { "status": true, "ip": "192.168.1.100", "port": 1883, "topic": "/temperature", "qos": 0 }                                                                | Set MQTT broker (`ip` may also be a hostname); applied without restart
+POST      |/api/config/admin/set          | { "current": "admin", "password": "new-password" } | Change the admin password (8 to 64 characters)
 GET       |/api/network/get               | {}                   | Get captive portal network status
 POST      |/api/network/set               | { "ssid": "IDAS-Lab", "pass": "password" }    | Set network connection
 POST      |/api/network/setStaticIP       | { "ip": "192.168.1.90", "subnet": "255.255.255.0", "gateway": "192.168.1.1", "dns": "8.8.8.8", "ssid": "IDAS-Lab", "pass": "password" }       | Set network connection by static address
 GET       |/api/dashboard/get             | {}                   | Get dashboard information
+GET       |/api/files/get                 | {}                   | List uploaded files and flash usage
+POST      |/upload                        | multipart file       | Upload a file (name: letters, digits, `.`, `_`, `-`; max 31 chars)
+GET       |/download/{filename}           | {}                   | Download an uploaded file
+POST      |/api/files/remove?filename=... | {}                   | Delete an uploaded file
+POST      |/api/update?filename=...       | {}                   | Flash an uploaded firmware `.bin`
+GET       |/api/update-status             | {}                   | Firmware update status (254 busy, 1 done, 0 failed)
 
 ### MQTT API
 
 Topic        | QoS | Message
 -------------|-----|--------
-/temperature | 0   | { "name": "WoT Device", "timestamp": 9801423, "value": { "temperature": 24.00, "humidity": 16.00 } }
+/temperature | 0   | { "name": "WoT Device", "timestamp": 9801423, "value": { "temperature": 24.7, "humidity": 41.0 } }
+
+Messages are published once per sample, only when the sensor reading is valid. `timestamp` is milliseconds since boot.
 
 ## Sotware Architecture and Design Approach
 
@@ -121,17 +153,18 @@ This layer contains our internal and external hardware, consist of DHT11 sensor 
 
 The classes functionalities and responsibility are detailed in the following.
 
-- `src/main.cpp`: Firstly, it calls begin functions of all sub-systems individually to setup them and then running sub-systems life-cycle in the loop function. The DHT sensor object is initializing with sensor pin and model values by DHTSensor class constructor at the main.
+- `src/main.cpp`: Firstly, it calls begin functions of all sub-systems individually to setup them and then running sub-systems life-cycle in the loop function. Each new sensor sample is pushed to the dashboard and the MQTT publisher from here.
 
 - `src/webServer.cpp`: This class by leveraging ESPAsyncWebServer library, as a web server, provides some Restful APIs to represent device functionalities on the Web. Users control and monitor WoT device through GUI dashboard or these APIs independently.
 
 - `src/publisher.cpp`: This class uses AsyncMqttClient library to enable WoT device to publish its data through MQTT protocol.
 
-- `src/configManager.cpp`: This class fetch default configuration data from Flash memory and then, replaced them by new values on user demands.
-- `src/WiFiManager.cpp`: Network management including captive portal and local network connection are main tasks of this class.
+- `src/configManager.cpp`: Loads and validates settings from `/sys/config.json` (falling back to defaults), and saves changes from the main loop.
+- `src/WiFiManager.cpp`: Non-blocking network management: station connection, background reconnect, and the captive portal.
 - `src/sensor.cpp`: Creating sensor object from DHT library, reading data from sensor and storing them in temporary memory are main activities of this class.  
 - `src/dashboard.cpp`: This class is responsible for preparing dashboard items and representing them by WebSocket connection into firmware UI.
 - `src/updater.cpp`: WoT firmware has been able to Over-The-Air update functionality by this class.
+- `src/system.cpp`: Runs restart and factory reset requests from the main loop, after the HTTP reply is sent.
 
 ```
 firmware-back/src/
@@ -148,6 +181,8 @@ firmware-back/src/
      publisher.h
      sensor.cpp
      sensor.h
+     system.cpp
+     system.h
      updater.cpp
      updater.h
      webServer.cpp
@@ -160,4 +195,4 @@ firmware-back/src/
 
 - This project is build and run over the [ESP8266 IoT framework](https://github.com/maakbaas/esp8266-iot-framework). Please find out this repository to learn more about implementation details.
 
-- You can flash the `firmware.bin` file, it already exist in `/firmware-back` , into your ESP8266 device by using ESP flasher tools, like [NodeMCU Flasher](https://github.com/nodemcu/nodemcu-flasher) or [ESPlorer](https://esp8266.ru/esplorer/).
+- Build the firmware with PlatformIO (`pio run`) and flash it with `pio run -t upload`. Prebuilt binaries are no longer kept in the repository.

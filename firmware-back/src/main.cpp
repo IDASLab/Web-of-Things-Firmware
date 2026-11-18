@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#include "LittleFS.h"
+#include <LittleFS.h>
 
 #include "WiFiManager.h"
 #include "webServer.h"
@@ -8,37 +8,50 @@
 #include "publisher.h"
 #include "dashboard.h"
 #include "sensor.h"
+#include "system.h"
 
-// Configuring DHT Sensor 
-#define SensorGPIO 5  // Digital pin connected to the DHT sensor
-#define SensorModel DHT11 //Type of sensor in use
-
-//creating sensor object by constructor for initializing DHT sensor values
-DHTSensor dhtsensor(SensorGPIO, SensorModel);
-
-// Setup sub-systems
-void setup() 
-{   
-    Serial.println(F(">> Device Firmware Start Successfully!"));
+void setup()
+{
     Serial.begin(115200);
-    
-    // Start all sub-systems individually 
+    Serial.println();
+    Serial.printf_P(PSTR(">> %s %s starting\n"), FIRMWARE_NAME, FIRMWARE_VERSION);
+
+    // File system first: settings live there.
+    if (!LittleFS.begin())
+    {
+        Serial.println(F("LittleFS mount failed, formatting..."));
+        LittleFS.format();
+        LittleFS.begin();
+    }
+
     configManager.begin();
-    LittleFS.begin();
-    server.begin();
     WiFiManager.begin();
-    mqttPublisher.begin();
+    server.begin();
     dash.begin();
-    dhtsensor.begin();   
+    mqttPublisher.begin();
+    dhtsensor.begin(configManager.sensorConfigData.gpio, configManager.sensorConfigData.model);
 }
 
-// Run sub-systems
-void loop() 
+void loop()
 {
     configManager.loop();
     WiFiManager.loop();
     updater.loop();
+    dhtsensor.loop();
+
+    // One sampler drives everything, so dashboard and MQTT always show the
+    // reading that was just taken.
+    if (dhtsensor.hasNewSample())
+    {
+        dash.data.sensorStatus = dhtsensor.ok();
+        dash.data.temperature = dhtsensor.temperature();
+        dash.data.humidity = dhtsensor.humidity();
+        dash.send();
+        if (dhtsensor.ok())
+            mqttPublisher.publish(dhtsensor.temperature(), dhtsensor.humidity());
+    }
+
     mqttPublisher.loop();
     dash.loop();
-    dhtsensor.loop();
+    systemControl.loop();
 }
