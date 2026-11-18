@@ -14,7 +14,6 @@
 #include "system.h"
 #include "logger.h"
 #include "timeSync.h"
-#include "default/logger_html.h"
 #include <memory>
 
 // Define WOT_ENABLE_CORS (build flag) only while developing the front end
@@ -247,7 +246,12 @@ void webServer::begin()
 
     server.addHandler(&ws);
     bindAll();
-    server.onNotFound(serveProgmem);
+    server.onNotFound([](AsyncWebServerRequest *request) {
+        // Unknown API calls get a JSON 404; any other path opens the web app.
+        if (request->url().startsWith("/api/"))
+            return sendError(request, 404, F("Unknown API endpoint"));
+        serveProgmem(request);
+    });
     server.begin();
 
     if (configManager.adminPasswordIsDefault())
@@ -561,14 +565,9 @@ void webServer::bindAll()
         request->send(response);
     });
 
-    // Logger page
-    auto servePage = [](AsyncWebServerRequest *request) {
-        AsyncWebServerResponse *response = request->beginResponse_P(200, "text/html", logger_html, logger_html_len);
-        response->addHeader("Content-Encoding", "gzip");
-        request->send(response);
-    };
-    server.on("/", HTTP_GET, servePage);
-    server.on("/logger", HTTP_GET, servePage);
+    // The web app (hash routes inside one page). /logger is kept for old bookmarks.
+    server.on("/", HTTP_GET, serveProgmem);
+    server.on("/logger", HTTP_GET, serveProgmem);
 
     // ---- Device ----------------------------------------------------------
 
