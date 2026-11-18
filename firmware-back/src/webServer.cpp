@@ -133,14 +133,92 @@ static void fmt10(char *dst, size_t n, int v)
 }
 
 // Streams rows of a session without building the whole response in RAM.
+//
+// The fill callback runs inside the network stack, where nothing else (WiFi,
+// the main loop, the watchdog) gets a turn until it returns. v1.3.0 opened,
+// seeked and closed the log file once per row there, so a CSV of a long
+// session took seconds per chunk and the watchdog reset the board. Now the
+// file is opened once per download and read in blocks.
+#define STREAM_BATCH 32         // records read from flash at a time
+#define STREAM_MAX_ACTIVE 2     // concurrent downloads
+#define STREAM_MIN_HEAP 6144    // largest free block needed to start one
+
 struct RowStream
 {
-    uint32_t id, next, end, step;
+    static uint8_t activeCount;
+
+    uint32_t id = 0, next = 0, end = 0, step = 1;
     bool headerDone = false, footerDone = false;
     String pending;
     std::function<String(const LogRecord &)> row;
     String header, footer;
+
+    File file;
+    uint32_t generation = 0;
+    LogRecord batch[STREAM_BATCH];
+    uint32_t batchStart = 0;
+    uint8_t batchCount = 0;
+
+    RowStream() { activeCount++; }
+    ~RowStream()
+    {
+        activeCount--;
+        if (file)
+            file.close();
+    }
+
+    bool read(uint32_t index, LogRecord &out)
+    {
+        if (batchCount && index >= batchStart && index < batchStart + batchCount)
+        {
+            out = batch[index - batchStart];
+            return true;
+        }
+        if (file && generation != logger.writeGeneration())
+        {
+            file.close(); // the logger appended or removed: reopen for a fresh view
+            batchCount = 0;
+        }
+        uint32_t inFile = logger.fileRecordCount(id);
+        if (index >= inFile)
+            return logger.readRecord(id, index, out); // still in the RAM buffer
+        if (!file)
+        {
+            generation = logger.writeGeneration();
+            file = LittleFS.open(Logger::binPath(id), "r");
+            if (!file)
+                return false;
+        }
+        // Whole blocks when reading every row, single records when skipping.
+        uint32_t want = step == 1 ? min<uint32_t>(STREAM_BATCH, inFile - index) : 1;
+        if (!file.seek(index * sizeof(LogRecord)))
+            return false;
+        size_t got = file.read(reinterpret_cast<uint8_t *>(batch), want * sizeof(LogRecord));
+        batchCount = got / sizeof(LogRecord);
+        batchStart = index;
+        if (!batchCount)
+            return false;
+        out = batch[0];
+        return true;
+    }
 };
+uint8_t RowStream::activeCount = 0;
+
+// Refuses a new download when the board is short of memory or busy.
+static bool streamAllowed(AsyncWebServerRequest *request)
+{
+    if (RowStream::activeCount >= STREAM_MAX_ACTIVE)
+    {
+        sendError(request, 503, F("Another download is running. Try again when it is done."));
+        return false;
+    }
+    if (ESP.getMaxFreeBlockSize() < STREAM_MIN_HEAP)
+    {
+        sendError(request, 503, F("The device is low on memory. Try again in a moment."));
+        return false;
+    }
+    return true;
+}
 
 static AsyncWebServerResponse *streamRows(AsyncWebServerRequest *request, const char *type, std::shared_ptr<RowStream> st)
 {
@@ -172,13 +250,12 @@ static AsyncWebServerResponse *streamRows(AsyncWebServerRequest *request, const 
         while (st->next < st->end && used < maxLen)
         {
             LogRecord r;
-            uint32_t idx = st->next;
-            st->next += st->step;
-            if (!logger.readRecord(st->id, idx, r))
+            if (!st->read(st->next, r))
             {
                 st->next = st->end;
                 break;
             }
+            st->next += st->step;
             String line = st->row(r);
             if (!put(line))
             {
@@ -499,6 +576,8 @@ void webServer::bindAll()
         uint32_t rows = end > from ? (end - from + step - 1) / step : 0;
         uint32_t next = from + rows * step;
 
+        if (!streamAllowed(request))
+            return;
         auto st = std::make_shared<RowStream>();
         st->id = id;
         st->next = from;
@@ -532,6 +611,8 @@ void webServer::bindAll()
         else if (!logger.loadInfo(id, info))
             return sendError(request, 404, F("Session not found"));
 
+        if (!streamAllowed(request))
+            return;
         auto st = std::make_shared<RowStream>();
         st->id = id;
         st->next = 0;
@@ -541,7 +622,7 @@ void webServer::bindAll()
         uint32_t startEpoch = info.startEpoch;
         st->row = [startEpoch](const LogRecord &r) {
             uint32_t epoch = r.epoch ? r.epoch : (startEpoch ? startEpoch + r.elapsed : 0);
-            String local = epoch ? TimeSync::formatLocal(epoch) : String();
+            String local = epoch ? timeSync.formatLocalFast(epoch) : String();
             char t[12] = "", h[12] = "";
             if (r.ok())
             {
@@ -594,6 +675,11 @@ void webServer::bindAll()
         doc["sensorErrors"] = dhtsensor.errorCount();
         doc["freeHeap"] = ESP.getFreeHeap();
         doc["uptime"] = millis() / 1000;
+        // Why the board last restarted; crash details help with bug reports.
+        doc["resetReason"] = ESP.getResetReason();
+        uint32_t why = ESP.getResetInfoPtr()->reason;
+        if (why == REASON_WDT_RST || why == REASON_EXCEPTION_RST || why == REASON_SOFT_WDT_RST)
+            doc["resetInfo"] = ESP.getResetInfo();
         String out;
         serializeJson(doc, out);
         request->send(200, JSON_TYPE, out);

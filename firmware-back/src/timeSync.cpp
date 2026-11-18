@@ -109,4 +109,35 @@ String TimeSync::formatLocal(time_t t)
     return String(buf);
 }
 
+String TimeSync::formatLocalFast(time_t t)
+{
+    long hour = t / 3600;
+    if (hour != fastHour || fastRevision != appliedRevision)
+    {
+        // UTC offset at this hour = local wall time read as UTC, minus t.
+        tm l;
+        localtime_r(&t, &l);
+        int y = l.tm_year + 1900 - (l.tm_mon < 2 ? 1 : 0);
+        int m = l.tm_mon + 1;
+        long era = (y >= 0 ? y : y - 399) / 400;
+        long yoe = y - era * 400;
+        long doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + l.tm_mday - 1;
+        long doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+        int64_t days = era * 146097L + doe - 719468L;
+        int64_t wall = days * 86400LL + l.tm_hour * 3600L + l.tm_min * 60L + l.tm_sec;
+        fastOffset = (int32_t)(wall - (int64_t)t);
+        fastHour = hour;
+        fastRevision = appliedRevision;
+    }
+    time_t lt = t + fastOffset;
+    tm g;
+    gmtime_r(&lt, &g);
+    int32_t off = fastOffset < 0 ? -fastOffset : fastOffset;
+    char buf[40];
+    snprintf_P(buf, sizeof(buf), PSTR("%04d-%02d-%02dT%02d:%02d:%02d%c%02d:%02d"),
+               g.tm_year + 1900, g.tm_mon + 1, g.tm_mday, g.tm_hour, g.tm_min, g.tm_sec,
+               fastOffset < 0 ? '-' : '+', (int)(off / 3600), (int)((off % 3600) / 60));
+    return String(buf);
+}
+
 TimeSync timeSync;

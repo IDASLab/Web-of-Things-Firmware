@@ -194,6 +194,7 @@ bool Logger::start(const char *name, const char *notes, String &error)
     s.humOffset = configManager.sensorConfigData.humOffset;
     s.active = true;
 
+    generation++;
     LittleFS.remove(binPath(s.id)); // leftover from a deleted state file
     if (!saveInfo(s))
     {
@@ -258,6 +259,7 @@ bool Logger::flush()
         return true;
     if (buffered > 0)
     {
+        generation++;
         File f = LittleFS.open(binPath(current.id), "a");
         if (!f)
         {
@@ -377,6 +379,7 @@ bool Logger::remove(uint32_t id, String &error)
         error = F("Session not found");
         return false;
     }
+    generation++;
     LittleFS.remove(binPath(id));
     LittleFS.remove(infoPath(id));
     return true;

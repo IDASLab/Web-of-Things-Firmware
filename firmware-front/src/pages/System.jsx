@@ -42,6 +42,7 @@ function DeviceCard({ info, reload }) {
                     <dt>Uptime</dt><dd>{duration(info.uptime)}</dd>
                     <dt>Free memory</dt><dd>{bytes(info.freeHeap)}</dd>
                     <dt>Address</dt><dd>{info.networkAddress || "–"}</dd>
+                    {info.resetReason && <><dt>Last restart</dt><dd>{info.resetReason}{info.resetInfo && <div class="help">{info.resetInfo}</div>}</dd></>}
                 </dl>
             )}
         </section>

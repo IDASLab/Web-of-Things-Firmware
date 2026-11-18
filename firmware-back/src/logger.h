@@ -78,6 +78,13 @@ public:
     // Reads record `index` of session `id` (includes unflushed readings).
     bool readRecord(uint32_t id, uint32_t index, LogRecord &out);
     bool remove(uint32_t id, String &error);
+    // Readings of session `id` that are already in its file (the rest are
+    // still in the RAM buffer). Readers can keep the file open while this
+    // and writeGeneration() stay the same.
+    uint32_t fileRecordCount(uint32_t id) { return current.active && id == current.id ? fileRecords : recordCount(id); }
+    // Changes whenever a log file is written or removed.
+    uint32_t writeGeneration() const { return generation; }
+    static String binPath(uint32_t id);
 
     // Storage
     size_t freeBytes();
@@ -94,11 +101,11 @@ private:
     LogRecord buffer[LOG_BUFFER_RECORDS];
     uint8_t buffered = 0;
     uint32_t lastFlush = 0;
+    uint32_t generation = 0;
 
     bool flush();
     bool saveInfo(const SessionInfo &s);
     void saveState();
-    static String binPath(uint32_t id);
     static String infoPath(uint32_t id);
 };
 

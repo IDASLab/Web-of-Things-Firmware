@@ -28,10 +28,17 @@ public:
 
     // ISO 8601 local time with offset, e.g. 2026-11-18T09:30:05+03:30
     static String formatLocal(time_t t);
+    // Same result as formatLocal, but looks up the time zone only once per
+    // hour of data. Used for CSV rows, where localtime/strftime per row is
+    // too slow inside the network stack.
+    String formatLocalFast(time_t t);
 
 private:
     Source src = Source::None;
     uint32_t lastSyncMillis = 0;
+    long fastHour = -1;
+    int32_t fastOffset = 0;
+    uint32_t fastRevision = 0;
     uint32_t appliedRevision = UINT32_MAX;
 
     void applyConfig();
