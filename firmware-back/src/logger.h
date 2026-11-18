@@ -102,6 +102,10 @@ private:
     uint8_t buffered = 0;
     uint32_t lastFlush = 0;
     uint32_t generation = 0;
+    size_t storageFree = 0, storageTotal = 0;
+    uint32_t storageCheckedAt = 0;
+    bool storageKnown = false;
+    void refreshStorage();
 
     bool flush();
     bool saveInfo(const SessionInfo &s);

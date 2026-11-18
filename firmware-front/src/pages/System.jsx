@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { get, post, upload } from "../api.js";
-import { AsyncButton, Spinner, confirmDialog, run, toast } from "../components/ui.jsx";
+import { AsyncButton, Spinner, confirmDialog, run, toast, usePoll } from "../components/ui.jsx";
 import { bytes, duration } from "../util.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -9,17 +9,19 @@ export function SystemPage() {
     const [info, setInfo] = useState(null);
     const [files, setFiles] = useState(null);
 
-    async function loadInfo() {
-        try { setInfo(await get("/api/dashboard/get")); } catch (e) { toast(e.message, true); }
+    async function loadInfo(quiet) {
+        // Background refreshes stay quiet: the header banner already says when the device is offline.
+        try { setInfo(await get("/api/dashboard/get")); } catch (e) { if (!quiet) toast(e.message, true); }
     }
     async function loadFiles() {
         try { setFiles(await get("/api/files/get")); } catch (e) { toast(e.message, true); }
     }
-    useEffect(() => { loadInfo(); loadFiles(); }, []);
+    useEffect(() => { loadFiles(); }, []);
+    usePoll(() => loadInfo(true), 10000); // keeps uptime and memory current during a long run
 
     return (
         <>
-            <DeviceCard info={info} reload={loadInfo} />
+            <DeviceCard info={info} reload={() => loadInfo(false)} />
             <FirmwareCard files={files} reloadFiles={loadFiles} />
             <FilesCard files={files} reload={loadFiles} />
             <MaintenanceCard />
@@ -40,9 +42,9 @@ function DeviceCard({ info, reload }) {
                     <dt>Device name</dt><dd>{info.deviceName}</dd>
                     <dt>Sensor</dt><dd>{info.sensorModel === 22 ? "DHT22" : info.sensorModel === 11 ? "DHT11" : info.sensorModel}{info.sensorErrors > 0 && <span class="muted"> · {info.sensorErrors} failed reads</span>}</dd>
                     <dt>Uptime</dt><dd>{duration(info.uptime)}</dd>
-                    <dt>Free memory</dt><dd>{bytes(info.freeHeap)}</dd>
+                    <dt>Free memory</dt><dd>{bytes(info.freeHeap)}{info.minFreeHeap !== undefined && <span class="muted"> · lowest {bytes(info.minFreeHeap)}, largest block {bytes(info.maxFreeBlock)}</span>}</dd>
                     <dt>Address</dt><dd>{info.networkAddress || "–"}</dd>
-                    {info.resetReason && <><dt>Last restart</dt><dd>{info.resetReason}{info.resetInfo && <div class="help">{info.resetInfo}</div>}</dd></>}
+                    {info.resetReason && <><dt>Last restart</dt><dd>{info.restartNote || info.resetReason}{info.resetInfo && <div class="help">{info.resetInfo}</div>}</dd></>}
                 </dl>
             )}
         </section>

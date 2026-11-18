@@ -173,6 +173,7 @@ bool Logger::start(const char *name, const char *notes, String &error)
         error = F("A session is already running");
         return false;
     }
+    refreshStorage();
     if (freeBytes() < LOG_MIN_FREE_BYTES * 2)
     {
         error = F("Not enough free storage. Delete old sessions first.");
@@ -287,6 +288,8 @@ bool Logger::flush()
 
 void Logger::loop()
 {
+    if (!storageKnown || millis() - storageCheckedAt > 60000UL)
+        refreshStorage();
     if (!current.active)
         return;
 
@@ -300,6 +303,7 @@ void Logger::loop()
 
     if (buffered > 0 && millis() - lastFlush > LOG_FLUSH_EVERY_MS)
     {
+        refreshStorage();
         if (freeBytes() < LOG_MIN_FREE_BYTES)
         {
             Serial.println(F("Logger: storage full, stopping session"));
@@ -382,21 +386,34 @@ bool Logger::remove(uint32_t id, String &error)
     generation++;
     LittleFS.remove(binPath(id));
     LittleFS.remove(infoPath(id));
+    storageKnown = false;
     return true;
+}
+
+// LittleFS.info() walks the whole file system, which gets slower as logs
+// grow. Web requests read a cached value, refreshed from loop().
+void Logger::refreshStorage()
+{
+    FSInfo info;
+    LittleFS.info(info);
+    storageTotal = info.totalBytes;
+    storageFree = info.totalBytes > info.usedBytes ? info.totalBytes - info.usedBytes : 0;
+    storageCheckedAt = millis();
+    storageKnown = true;
 }
 
 size_t Logger::freeBytes()
 {
-    FSInfo info;
-    LittleFS.info(info);
-    return info.totalBytes > info.usedBytes ? info.totalBytes - info.usedBytes : 0;
+    if (!storageKnown)
+        refreshStorage();
+    return storageFree;
 }
 
 size_t Logger::totalBytes()
 {
-    FSInfo info;
-    LittleFS.info(info);
-    return info.totalBytes;
+    if (!storageKnown)
+        refreshStorage();
+    return storageTotal;
 }
 
 uint32_t Logger::capacityRecords()

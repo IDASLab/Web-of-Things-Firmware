@@ -314,7 +314,10 @@ The firmware is organized in three layers. The application layer has the web pag
 
 - Fixed: downloading a CSV, or opening the chart of a long session, could freeze the board until the watchdog restarted it. Each row opened the log file again inside the network stack; downloads now open it once and read it in blocks
 - At most two downloads at a time, and none when memory is low (the device answers "try again" instead of crashing)
-- The System page shows why the board last restarted, with crash details
+- Storage space is read from flash once a minute instead of three times per status request, which got slower as logs grew
+- The Logger page asks for chart data only when there is a new point, and never stacks requests on a slow device
+- If free memory stays critically low for a minute, the board saves its readings and restarts itself instead of becoming unreachable; the recording continues after the restart
+- The System page shows why the board last restarted (with crash details), and free memory with its lowest point since boot, refreshed every 10 seconds. The serial log prints a health line every 10 minutes
 
 **v1.3.0: new web app**
 

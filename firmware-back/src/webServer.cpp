@@ -674,12 +674,16 @@ void webServer::bindAll()
         doc["brokerTopic"] = mqttPublisher.getBrokerTopic();
         doc["sensorErrors"] = dhtsensor.errorCount();
         doc["freeHeap"] = ESP.getFreeHeap();
+        doc["minFreeHeap"] = systemControl.minFreeHeap();
+        doc["maxFreeBlock"] = ESP.getMaxFreeBlockSize();
         doc["uptime"] = millis() / 1000;
         // Why the board last restarted; crash details help with bug reports.
         doc["resetReason"] = ESP.getResetReason();
         uint32_t why = ESP.getResetInfoPtr()->reason;
         if (why == REASON_WDT_RST || why == REASON_EXCEPTION_RST || why == REASON_SOFT_WDT_RST)
             doc["resetInfo"] = ESP.getResetInfo();
+        if (systemControl.restartNote()[0])
+            doc["restartNote"] = systemControl.restartNote();
         String out;
         serializeJson(doc, out);
         request->send(200, JSON_TYPE, out);
