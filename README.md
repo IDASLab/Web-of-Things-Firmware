@@ -4,7 +4,9 @@ Firmware that turns an ESP8266 board and a DHT11 sensor into a temperature and h
 
 ![Logger page](doc/UI/logger.png)
 
-*The logger page (sample data).*
+*The Logger page (sample data). Settings and System pages, on a phone in dark mode:*
+
+<p><img src="doc/UI/settings-phone.png" width="260" alt="Settings page on a phone"> <img src="doc/UI/system-phone.png" width="260" alt="System page on a phone"></p>
 
 ## Features
 
@@ -17,6 +19,7 @@ Firmware that turns an ESP8266 board and a DHT11 sensor into a temperature and h
 - **WiFi setup portal:** the board opens its own hotspot when it can't join a network, and keeps retrying in the background.
 - **Firmware update over WiFi** from the web interface.
 - **Optional MQTT publishing** of every reading.
+- **One web app for everything:** Logger, Network, Settings and System pages. Works on phones, follows the system dark mode, confirms risky actions, and checks your input before it is sent.
 - **Login protection** for every page and API endpoint.
 
 ## Contents
@@ -85,7 +88,7 @@ The serial monitor (115200 baud) shows the board's IP address, WiFi state and ev
 
 1. **Connect to the board.** If it has no WiFi network saved, it opens a hotspot named `WoT-XXXXXX` (unique per board) with password `12345678`. Join it and open `http://192.168.4.1`.
 2. **Log in** with user `admin` and password `admin`.
-3. **Change the admin password** right away. Run this from any computer on the same network:
+3. **Change the admin password** right away, on **Settings → Admin login**. You can also do it from any computer on the same network:
 
    ```
    curl -u admin:admin -H "Content-Type: application/json" \
@@ -94,13 +97,13 @@ The serial monitor (115200 baud) shows the board's IP address, WiFi state and ev
    ```
 
 4. **Join your WiFi** (optional) on the **Network** page. The board then gets an address from your router, which the serial monitor prints. If the network is down at power-on, or drops later, the board keeps retrying. After a while it opens the hotspot again so you can still reach it.
-5. **Change the hotspot name and password** (optional) on the **Device settings** page. The hotspot password must be 8 to 63 characters.
+5. **Change the hotspot name and password** (optional) on **Settings → Device**. The hotspot password must be 8 to 63 characters.
 
 ## Recording an experiment
 
-Open `http://<board address>/` to get to the logger page.
+Open `http://<board address>/`. The app opens on the **Logger** page.
 
-1. **Check the clock.** The header badge shows `Clock: ntp` when the board has internet. Otherwise opening the page sets the clock from your browser (`Clock: browser`).
+1. **Check the clock.** The header badge shows `Clock: NTP` when the board has internet. Otherwise opening the page sets the clock from your browser (`Clock: browser`).
 2. **Start a session.** Enter a name, optional notes and the sample interval in seconds, then press **Start recording**.
 3. **Watch it run.** The chart updates as readings arrive. Sensor errors show as gaps, and min, average and max update live. You can close the browser: recording continues on the board.
 4. **Stop the session** with **Stop recording**.
@@ -142,13 +145,13 @@ The file opens directly in Excel, LibreOffice, Python (pandas) or MATLAB.
 
 ## Time and calibration
 
-Both are on the logger page under **Calibration and time**.
+Both are on the **Settings** page, in the **Sensor and calibration** and **Time** cards.
 
 **Time**
 
 - With internet, the board uses NTP (`pool.ntp.org` by default).
-- Without internet, the clock and your UTC offset are set from the browser whenever you open the logger page. Open it once before starting a session. If the clock is set after a session started, earlier readings get their timestamps filled in from the start time.
-- For automatic daylight saving time, enter a POSIX time zone such as `CET-1CEST,M3.5.0,M10.5.0/3` (Central Europe) or `EST5EDT,M3.2.0,M11.1.0` (US Eastern).
+- Without internet, the clock and your UTC offset are set from the browser whenever you open the web app. Open it once before starting a session. If the clock is set after a session started, earlier readings get their timestamps filled in from the start time.
+- For automatic daylight saving time, pick a time zone from the list, or choose **Custom** and enter a POSIX time zone such as `CET-1CEST,M3.5.0,M10.5.0/3` (Central Europe) or `EST5EDT,M3.2.0,M11.1.0` (US Eastern).
 - The clock does not survive a power cut without NTP. Open the page again after one.
 
 **Calibration**
@@ -157,15 +160,18 @@ Compare against a reference thermometer or hygrometer, and enter the difference 
 
 ## Device settings and maintenance
 
-The original settings pages are linked from the logger header.
+The web app has four pages, reached from the tabs in its header. Each page has its own link, so you can bookmark it.
 
-| Page | Use it to |
-| --- | --- |
-| `/config` | Device name, hotspot name and password, sample interval, MQTT broker |
-| `/network` | Join or forget a WiFi network, static IP |
-| `/setting` | Upload and flash new firmware, restart, factory reset |
+| Page | Link | Use it to |
+| --- | --- | --- |
+| Logger | `/#/` | Live reading, start and stop sessions, chart, session list and CSV downloads |
+| Network | `/#/network` | See the connection, join or forget a WiFi network, static IP |
+| Settings | `/#/settings` | Sample interval and calibration, time server and time zone, device name and hotspot, MQTT, admin password |
+| System | `/#/system` | Device info, firmware update, files on the board, restart, factory reset |
 
-**Firmware update over WiFi:** build with `pio run`. On the **Firmware** page, upload `firmware-back/.pio/build/d1/firmware.bin`, flash it, then restart. A running session continues after the restart.
+The header badges show at a glance whether a session is recording, whether the sensor answers, the WiFi state, the clock source and how full the storage is. If the board can't be reached, a banner says so and the page reconnects by itself.
+
+**Firmware update over WiFi:** build with `pio run`. On the **System** page, choose `firmware-back/.pio/build/d1/firmware.bin`, press **Install**, then **Restart now** when it is done. A running session continues after the restart.
 
 **Factory reset** restores the default settings, including the `admin` / `admin` login. Recorded sessions are kept.
 
@@ -180,7 +186,7 @@ Settings are stored as JSON in `/sys/config.json` on the board. The defaults liv
 
 ## MQTT (optional)
 
-Turn on MQTT on the **Device settings** page and enter the broker address (IP or hostname), port, topic and QoS. Every valid reading is published, with the retain flag set:
+Turn on MQTT on the **Settings** page and enter the broker address (IP or hostname), port, topic and QoS. Every valid reading is published, with the retain flag set:
 
 ```
 Topic: /temperature
@@ -248,7 +254,7 @@ firmware-back/
     sensor.cpp           DHT reading, retry, calibration
     logger.cpp           sessions, batched flash writes, resume, stats
     timeSync.cpp         NTP / browser time and time zone
-    webServer.cpp        REST API, login, logger page, CSV streaming
+    webServer.cpp        REST API, login, web app, CSV streaming
     WiFiManager.cpp      WiFi connection, reconnect, setup hotspot
     configManager.cpp    settings in /sys/config.json, validation
     publisher.cpp        MQTT
@@ -257,25 +263,28 @@ firmware-back/
     system.cpp           restart and factory reset
     default/
       config.cpp         default settings
-      html.h             original dashboard (built from firmware-front)
-      logger_html.h      logger page (generated from web/logger.html)
-  web/logger.html        logger page source
-  tools/embed_html.py    gzips logger.html into logger_html.h
-firmware-front/          Preact source of the original dashboard
+      html.h             the web app, gzipped (generated by firmware-front)
+firmware-front/          web app source (Preact + Vite)
+  src/app.jsx            header, tabs, status polling
+  src/pages/             Logger, Network, Settings, System
+  src/components/        chart, dialogs, toasts, form fields
+  scripts/embed.mjs      gzips dist/index.html into html.h
 doc/                     diagrams and screenshots
 ```
 
-### Editing the logger page
+### Editing the web app
 
-Edit `firmware-back/web/logger.html` (plain HTML and JavaScript, no build step), then run:
+The UI is a [Preact](https://preactjs.com/) app built with [Vite](https://vite.dev/) into one self-contained HTML file (about 21 KB gzipped). You need Node.js 18 or later.
 
 ```
-python3 firmware-back/tools/embed_html.py
+cd firmware-front
+npm install
+npm run build        # writes firmware-back/src/default/html.h
 ```
 
-### Editing the original dashboard
+Then rebuild and flash the firmware. Commit the regenerated `html.h` so the firmware builds without Node.
 
-The settings pages are a [Preact](https://preactjs.com/) app in `firmware-front`. Running `npm run build` there regenerates `firmware-back/src/default/html.h`. To develop the UI from another origin, build the firmware with `-DWOT_ENABLE_CORS` (see `platformio.ini`), and never ship that build.
+For live editing, run `DEVICE=http://<board address> npm run dev` and open the address it prints. Vite forwards the API calls to the board, so you don't need a CORS build. Your browser asks for the board login on the first call.
 
 ### Libraries
 
@@ -299,6 +308,17 @@ The firmware is organized in three layers. The application layer has the web pag
 | Firmware update says "not enough space" | Make sure the board was flashed with the 4m2m layout from `platformio.ini` |
 
 ## Changelog
+
+**v1.3.0: new web app**
+
+- The logger and the old settings pages are now one app with Logger, Network, Settings and System pages
+- Works on phones (the old pages overflowed the screen), with dark mode
+- Fixed: the MQTT switch always loaded as off, so saving any setting turned MQTT off
+- Fixed: saving gave no feedback and errors were hidden. Every action now shows a success or error message
+- Fixed: forms showed current values only as placeholders, MQTT topics with `/` or `#` were mangled, and the hotspot password was shown in clear text
+- New: admin password, time zone and calibration in the UI, confirmations before deleting or resetting, upload progress, a step-by-step firmware update
+- Built with Vite instead of webpack 4; the app is less than half the size (21 KB instead of 46 KB gzipped), and the vulnerable axios library is gone (Preact is the only runtime dependency)
+- Unknown `/api/` paths now answer with a JSON 404 instead of the web page
 
 **v1.2.0: experiment logger**
 
