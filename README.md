@@ -294,7 +294,24 @@ For live editing, run `DEVICE=http://<board address> npm run dev` and open the a
 
 ![Architecture](doc/diagrams/System/Architecture.png)
 
-The firmware is organized in three layers. The application layer has the web page, REST API and MQTT. The middleware layer has logging, WiFi, settings, time and updates. The things layer is the DHT sensor and the flash memory.
+*Source: [`Architecture.svg`](doc/diagrams/System/Architecture.svg). Boxes marked NEW were added in v1.2 to v1.3.*
+
+The firmware is organized in layers, from the clients down to the hardware.
+
+- **Application layer:** what clients see. The web app is one gzipped HTML file served from flash. The REST API carries settings and status as JSON. Session data goes out as CSV or chart rows, streamed in blocks. MQTT messages carry one reading each.
+- **Provider:** `webServer` owns every route, the login and the cross-site check. `publisher` keeps the MQTT connection, retrying with backoff.
+- **Main functionality:**
+  - `sensor` reads the DHT11 on a fixed schedule and applies calibration.
+  - `logger` stores sessions: readings collect in a RAM buffer and go to flash every 2 minutes or every 32 readings, and a session resumes after a reboot.
+  - `timeSync` sets the clock from NTP or from your browser.
+  - `configManager` keeps validated settings in `/sys/config.json`, and `WiFiManager` joins your network or opens the setup hotspot.
+  - `updater` installs an uploaded firmware file. `system` handles restart, factory reset and the low-memory guard. `dashboard` pushes live values over WebSocket.
+- **SDK and libraries:** the ESP8266 Arduino core 3.1.2 with LittleFS and SNTP, Adafruit DHT, ArduinoJson 7, and the async web server, TCP and MQTT libraries.
+- **Things layer:** the DHT11 on GPIO5, the 4 MB flash (settings, logs, uploaded firmware) and the WiFi radio.
+
+**How a reading flows:** the main loop asks `sensor` for a sample. When one arrives, it goes to `logger` (buffered, then written to flash), to `publisher` (MQTT) and to `dashboard`. The web app polls `/api/logger/status` for the latest values.
+
+**Two rules keep the board responsive.** Web requests are handled inside the network stack, where nothing else runs until they return. So handlers only read state, or leave work such as restarts for the main loop. Downloads read the log file in blocks, and slow lookups such as free storage are cached. Everything that writes to flash runs in the main loop.
 
 ## Troubleshooting
 

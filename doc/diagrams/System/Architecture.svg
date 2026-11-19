@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1290" width="1200" height="1290" font-family="Helvetica, Arial, sans-serif">
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10" fill="none" stroke="#111" stroke-width="1.6"/></marker><marker id="aw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10" fill="none" stroke="#fff" stroke-width="1.8"/></marker></defs>
+<rect width="1200" height="1290" fill="#fff"/>
+<rect x="20" y="20" width="1160" height="130" rx="14" fill="#f8fafc" stroke="#94a3b8" stroke-width="2" stroke-dasharray="8 6"/>
+<text x="600.0" y="52" font-size="24" fill="#334155" font-weight="700" text-anchor="middle">Clients</text>
+<rect x="50.0" y="68" width="818.5" height="64" rx="14" fill="#fff" stroke="#888" stroke-width="2"/>
+<text x="459.25" y="94.0" font-size="22" fill="#000" font-weight="700" text-anchor="middle">Browser or phone</text>
+<text x="459.25" y="120.0" font-size="15" fill="#444" font-weight="400" text-anchor="middle">web app: Logger · Network · Settings · System</text>
+<rect x="894.5" y="68" width="255.5" height="64" rx="14" fill="#fff" stroke="#888" stroke-width="2"/>
+<text x="1022.25" y="94.0" font-size="22" fill="#000" font-weight="700" text-anchor="middle">MQTT broker</text>
+<text x="1022.25" y="120.0" font-size="15" fill="#444" font-weight="400" text-anchor="middle">optional</text>
+<rect x="20" y="180" width="1160" height="165" rx="14" fill="#00E1FF" stroke="#0ab" stroke-width="2"/>
+<text x="600.0" y="214" font-size="28" fill="#fff" font-weight="700" text-anchor="middle">Application Layer</text>
+<rect x="50.0" y="236" width="255.5" height="88" rx="14" fill="#fff" stroke="#888" stroke-width="2"/>
+<text x="177.75" y="274.0" font-size="22" fill="#000" font-weight="700" text-anchor="middle">Web app</text>
+<text x="177.75" y="300.0" font-size="15" fill="#444" font-weight="400" text-anchor="middle">served from flash</text>
+<rect x="253.5" y="224" width="58" height="24" rx="12" fill="#f59e0b" stroke="none" stroke-width="2"/>
+<text x="282.5" y="241" font-size="13" fill="#fff" font-weight="700" text-anchor="middle">NEW</text>
+<rect x="331.5" y="236" width="255.5" height="88" rx="14" fill="#fff" stroke="#888" stroke-width="2"/>
+<text x="459.25" y="274.0" font-size="22" fill="#000" font-weight="700" text-anchor="middle">REST API</text>
+<text x="459.25" y="300.0" font-size="15" fill="#444" font-weight="400" text-anchor="middle">JSON · login</text>
+<rect x="613.0" y="236" width="255.5" height="88" rx="14" fill="#fff" stroke="#888" stroke-width="2"/>
+<text x="740.75" y="274.0" font-size="22" fill="#000" font-weight="700" text-anchor="middle">CSV / chart data</text>
+<text x="740.75" y="300.0" font-size="15" fill="#444" font-weight="400" text-anchor="middle">streamed in blocks</text>
+<rect x="816.5" y="224" width="58" height="24" rx="12" fill="#f59e0b" stroke="none" stroke-width="2"/>
+<text x="845.5" y="241" font-size="13" fill="#fff" font-weight="700" text-anchor="middle">NEW</text>
+<rect x="894.5" y="236" width="255.5" height="88" rx="14" fill="#fff" stroke="#888" stroke-width="2"/>
+<text x="1022.25" y="274.0" font-size="22" fill="#000" font-weight="700" text-anchor="middle">MQTT messages</text>
+<text x="1022.25" y="300.0" font-size="15" fill="#444" font-weight="400" text-anchor="middle">one per reading</text>
+<rect x="20" y="375" width="1160" height="725" rx="14" fill="#e8e8e8" stroke="#aaa" stroke-width="2"/>
+<text x="600.0" y="412" font-size="28" fill="#000" font-weight="700" text-anchor="middle">Middleware Layer</text>
+<rect x="40" y="432" width="1120" height="140" rx="10" fill="#f05558" stroke="none" stroke-width="2"/>
+<text x="600.0" y="462" font-size="26" fill="#fff" font-weight="700" text-anchor="middle">Provider</text>
+<rect x="50.0" y="480" width="818.5" height="76" rx="14" fill="#fff" stroke="#888" stroke-width="2"/>
+<text x="459.25" y="512.0" font-size="22" fill="#000" font-weight="700" text-anchor="middle">webServer</text>
+<text x="459.25" y="538.0" font-size="15" fill="#444" font-weight="400" text-anchor="middle">routes · login · cross-site check · streaming</text>
+<rect x="894.5" y="480" width="255.5" height="76" rx="14" fill="#fff" stroke="#888" stroke-width="2"/>
+<text x="1022.25" y="512.0" font-size="22" fill="#000" font-weight="700" text-anchor="middle">publisher</text>
+<text x="1022.25" y="538.0" font-size="15" fill="#444" font-weight="400" text-anchor="middle">retry with backoff</text>
+<rect x="40" y="592" width="1120" height="320" rx="10" fill="#33475f" stroke="none" stroke-width="2"/>
+<text x="600.0" y="624" font-size="26" fill="#fff" font-weight="700" text-anchor="middle">Main Functionality</text>
+<rect x="50.0" y="648" width="255.5" height="88" rx="14" fill="#fff" stroke="#888" stroke-width="2"/>
+<text x="177.75" y="686.0" font-size="22" fill="#000" font-weight="700" text-anchor="middle">configManager</text>
+<text x="177.75" y="712.0" font-size="15" fill="#444" font-weight="400" text-anchor="middle">/sys/config.json</text>
+<rect x="331.5" y="648" width="255.5" height="88" rx="14" fill="#fff" stroke="#888" stroke-width="2"/>
+<text x="459.25" y="686.0" font-size="22" fill="#000" font-weight="700" text-anchor="middle">WiFiManager</text>
+<text x="459.25" y="712.0" font-size="15" fill="#444" font-weight="400" text-anchor="middle">join · retry · hotspot</text>
+<rect x="613.0" y="648" width="255.5" height="88" rx="14" fill="#fff" stroke="#888" stroke-width="2"/>
+<text x="740.75" y="686.0" font-size="22" fill="#000" font-weight="700" text-anchor="middle">updater</text>
+<text x="740.75" y="712.0" font-size="15" fill="#444" font-weight="400" text-anchor="middle">flash an uploaded .bin</text>
+<rect x="894.5" y="648" width="255.5" height="88" rx="14" fill="#fff" stroke="#888" stroke-width="2"/>
+<text x="1022.25" y="686.0" font-size="22" fill="#000" font-weight="700" text-anchor="middle">dashboard</text>
+<text x="1022.25" y="712.0" font-size="15" fill="#444" font-weight="400" text-anchor="middle">WebSocket push</text>
+<rect x="50.0" y="790" width="255.5" height="88" rx="14" fill="#fff" stroke="#888" stroke-width="2"/>
+<text x="177.75" y="828.0" font-size="22" fill="#000" font-weight="700" text-anchor="middle">sensor</text>
+<text x="177.75" y="854.0" font-size="15" fill="#444" font-weight="400" text-anchor="middle">DHT11 · calibration</text>
+<rect x="331.5" y="790" width="255.5" height="88" rx="14" fill="#fff" stroke="#888" stroke-width="2"/>
+<text x="459.25" y="828.0" font-size="22" fill="#000" font-weight="700" text-anchor="middle">logger</text>
+<text x="459.25" y="854.0" font-size="15" fill="#444" font-weight="400" text-anchor="middle">sessions · buffer · stats</text>
+<rect x="535.0" y="778" width="58" height="24" rx="12" fill="#f59e0b" stroke="none" stroke-width="2"/>
+<text x="564.0" y="795" font-size="13" fill="#fff" font-weight="700" text-anchor="middle">NEW</text>
+<rect x="613.0" y="790" width="255.5" height="88" rx="14" fill="#fff" stroke="#888" stroke-width="2"/>
+<text x="740.75" y="828.0" font-size="22" fill="#000" font-weight="700" text-anchor="middle">timeSync</text>
+<text x="740.75" y="854.0" font-size="15" fill="#444" font-weight="400" text-anchor="middle">NTP or browser clock</text>
+<rect x="816.5" y="778" width="58" height="24" rx="12" fill="#f59e0b" stroke="none" stroke-width="2"/>
+<text x="845.5" y="795" font-size="13" fill="#fff" font-weight="700" text-anchor="middle">NEW</text>
+<rect x="894.5" y="790" width="255.5" height="88" rx="14" fill="#fff" stroke="#888" stroke-width="2"/>
+<text x="1022.25" y="828.0" font-size="22" fill="#000" font-weight="700" text-anchor="middle">system</text>
+<text x="1022.25" y="854.0" font-size="15" fill="#444" font-weight="400" text-anchor="middle">restart · reset · memory guard</text>
+<rect x="1098.0" y="778" width="58" height="24" rx="12" fill="#f59e0b" stroke="none" stroke-width="2"/>
+<text x="1127.0" y="795" font-size="13" fill="#fff" font-weight="700" text-anchor="middle">NEW</text>
+<rect x="40" y="930" width="1120" height="150" rx="10" fill="#212833" stroke="none" stroke-width="2"/>
+<text x="600.0" y="962" font-size="24" fill="#fff" font-weight="700" text-anchor="middle">SDK / Libraries</text>
+<rect x="50.0" y="982" width="255.5" height="78" rx="14" fill="#fff" stroke="#888" stroke-width="2"/>
+<text x="177.75" y="1015.0" font-size="22" fill="#000" font-weight="700" text-anchor="middle">DHT</text>
+<text x="177.75" y="1041.0" font-size="15" fill="#444" font-weight="400" text-anchor="middle">Adafruit</text>
+<rect x="331.5" y="982" width="255.5" height="78" rx="14" fill="#fff" stroke="#888" stroke-width="2"/>
+<text x="459.25" y="1015.0" font-size="22" fill="#000" font-weight="700" text-anchor="middle">LittleFS</text>
+<text x="459.25" y="1041.0" font-size="15" fill="#444" font-weight="400" text-anchor="middle">files on flash</text>
+<rect x="613.0" y="982" width="255.5" height="78" rx="14" fill="#fff" stroke="#888" stroke-width="2"/>
+<text x="740.75" y="1015.0" font-size="22" fill="#000" font-weight="700" text-anchor="middle">SNTP · time</text>
+<text x="740.75" y="1041.0" font-size="15" fill="#444" font-weight="400" text-anchor="middle">ArduinoJson 7</text>
+<rect x="894.5" y="982" width="255.5" height="78" rx="14" fill="#fff" stroke="#888" stroke-width="2"/>
+<text x="1022.25" y="1015.0" font-size="22" fill="#000" font-weight="700" text-anchor="middle">ESPAsyncWebServer</text>
+<text x="1022.25" y="1041.0" font-size="15" fill="#444" font-weight="400" text-anchor="middle">AsyncTCP · AsyncMqttClient</text>
+<rect x="20" y="1120" width="1160" height="150" rx="14" fill="#0b6b70" stroke="#085" stroke-width="2"/>
+<text x="600.0" y="1154" font-size="28" fill="#fff" font-weight="700" text-anchor="middle">Things Layer</text>
+<rect x="50.0" y="1176" width="255.5" height="74" rx="14" fill="#fff" stroke="#888" stroke-width="2"/>
+<text x="177.75" y="1207.0" font-size="22" fill="#000" font-weight="700" text-anchor="middle">GPIO5</text>
+<text x="177.75" y="1233.0" font-size="15" fill="#444" font-weight="400" text-anchor="middle">DHT11 sensor</text>
+<rect x="331.5" y="1176" width="255.5" height="74" rx="14" fill="#fff" stroke="#888" stroke-width="2"/>
+<text x="459.25" y="1207.0" font-size="22" fill="#000" font-weight="700" text-anchor="middle">Flash memory</text>
+<text x="459.25" y="1233.0" font-size="15" fill="#444" font-weight="400" text-anchor="middle">settings · logs · firmware</text>
+<rect x="613.0" y="1176" width="537.0" height="74" rx="14" fill="#fff" stroke="#888" stroke-width="2"/>
+<text x="881.5" y="1207.0" font-size="22" fill="#000" font-weight="700" text-anchor="middle">WiFi radio</text>
+<text x="881.5" y="1233.0" font-size="15" fill="#444" font-weight="400" text-anchor="middle">station + hotspot</text>
+<line x1="178" y1="134" x2="178" y2="233" stroke="#111" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#ah)" marker-start="url(#ah)"/>
+<line x1="459" y1="134" x2="459" y2="233" stroke="#111" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#ah)" marker-start="url(#ah)"/>
+<line x1="741" y1="134" x2="741" y2="233" stroke="#111" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#ah)" marker-start="url(#ah)"/>
+<line x1="1022" y1="234" x2="1022" y2="135" stroke="#111" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#ah)"/>
+<line x1="178" y1="478" x2="178" y2="327" stroke="#111" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#ah)"/>
+<line x1="459" y1="478" x2="459" y2="327" stroke="#111" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#ah)"/>
+<line x1="741" y1="478" x2="741" y2="327" stroke="#111" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#ah)"/>
+<line x1="1022" y1="478" x2="1022" y2="327" stroke="#111" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#ah)"/>
+<line x1="308" y1="834" x2="328" y2="834" stroke="#fff" stroke-width="2.5" marker-end="url(#aw)"/>
+<line x1="589" y1="834" x2="610" y2="834" stroke="#fff" stroke-width="2.5" marker-end="url(#aw)"/>
+<line x1="178" y1="880" x2="178" y2="979" stroke="#111" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#ah)"/>
+<line x1="459" y1="880" x2="459" y2="979" stroke="#111" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#ah)"/>
+<line x1="741" y1="880" x2="741" y2="979" stroke="#111" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#ah)"/>
+<line x1="178" y1="1062" x2="178" y2="1173" stroke="#111" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#ah)"/>
+<line x1="459" y1="1062" x2="459" y2="1173" stroke="#111" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#ah)"/>
+<line x1="1022" y1="1062" x2="1022" y2="1173" stroke="#111" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#ah)"/>
+</svg>
