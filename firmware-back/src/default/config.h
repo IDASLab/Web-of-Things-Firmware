@@ -6,7 +6,7 @@
 // Firmware identity. Compiled in (not stored in flash) so it is always
 // correct after an update.
 #define FIRMWARE_NAME "Helenor"
-#define FIRMWARE_VERSION "v1.3.0"
+#define FIRMWARE_VERSION "v1.3.1"
 
 // Field sizes include the terminating NUL.
 #define LEN_NAME 33

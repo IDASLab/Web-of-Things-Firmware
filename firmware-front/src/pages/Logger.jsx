@@ -82,7 +82,8 @@ export function LoggerPage({ status, refresh }) {
 
     async function fetchRows(reset) {
         const c = cursor.current;
-        if (!c.id) return;
+        if (!c.id || c.busy) return; // a slow device must not pile up requests
+        c.busy = true;
         try {
             for (let guard = 0; guard < 20; guard++) {
                 const d = await get(`/api/session/data?id=${c.id}&from=${c.next}&step=${c.step}&max=${MAX_POINTS}`);
@@ -95,6 +96,8 @@ export function LoggerPage({ status, refresh }) {
             setRows(c.rows);
         } catch (e) {
             toast(e.message, true);
+        } finally {
+            c.busy = false;
         }
     }
 
@@ -119,8 +122,8 @@ export function LoggerPage({ status, refresh }) {
         lastActive.current = status.active;
         if (status.active && (!view || was === false || was === undefined)) {
             if (!view || view.id !== status.session.id) show(status.session);
-        } else if (status.active && view && view.id === status.session.id) {
-            fetchRows(false);
+        } else if (status.active && view && view.id === status.session.id && status.session.count >= cursor.current.next + cursor.current.step) {
+            fetchRows(false); // only when there is a new point to draw
         }
         if (was !== undefined && was !== status.active) loadSessions();
     }, [status]);

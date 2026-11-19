@@ -26,6 +26,7 @@ void setup()
         LittleFS.begin();
     }
 
+    systemControl.begin();
     configManager.begin();
     timeSync.begin();
     WiFiManager.begin();

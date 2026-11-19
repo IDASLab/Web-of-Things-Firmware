@@ -305,9 +305,19 @@ The firmware is organized in three layers. The application layer has the web pag
 | Browser keeps asking for a password | Use user `admin` and your admin password. A factory reset brings back `admin` / `admin` |
 | CSV has no `time_local` | The clock was not set. Open the logger page (browser time), or give the board internet access |
 | Recording stopped by itself | Storage was full. Download and delete old sessions |
+| Board stops answering or restarts | Open **System**: *Last restart* shows the reason, and the crash details after an exception or watchdog reset. For a full log, connect USB and run `pio device monitor -d firmware-back -f esp8266_exception_decoder`, then reproduce the problem and copy the output |
 | Firmware update says "not enough space" | Make sure the board was flashed with the 4m2m layout from `platformio.ini` |
 
 ## Changelog
+
+**v1.3.1: crash fix**
+
+- Fixed: downloading a CSV, or opening the chart of a long session, could freeze the board until the watchdog restarted it. Each row opened the log file again inside the network stack; downloads now open it once and read it in blocks
+- At most two downloads at a time, and none when memory is low (the device answers "try again" instead of crashing)
+- Storage space is read from flash once a minute instead of three times per status request, which got slower as logs grew
+- The Logger page asks for chart data only when there is a new point, and never stacks requests on a slow device
+- If free memory stays critically low for a minute, the board saves its readings and restarts itself instead of becoming unreachable; the recording continues after the restart
+- The System page shows why the board last restarted (with crash details), and free memory with its lowest point since boot, refreshed every 10 seconds. The serial log prints a health line every 10 minutes
 
 **v1.3.0: new web app**
 
